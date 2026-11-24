@@ -101,8 +101,8 @@ declared polymorphic function an ordinary event.
 ## What each group of predicates claims
 
 * `checkMonoAllFuncsMonomorphic`, `checkMonoFactoryMonomorphic`, `checkMonoOutputTypechecks` and
-  `checkMonoIdempotent` state the three claims of the tests of Strata over the generator, and they add
-  idempotence, which those tests do not state.
+  `checkMonoSecondRun` state the three claims of the tests of Strata over the generator, and they
+  add the claim about a second run, which those tests do not state.
 * `checkMonoTypeDeclsUnchanged`, `checkMonoPolyDatatypesRemain` and `checkMonoDerivedOpsRewritten` state one
   asymmetry: the pass specializes the *derived functions* of a polymorphic datatype, and it does not
   specialize the *declaration* of that datatype. `processTopDecls` gives a `.type` declaration back through
@@ -156,9 +156,7 @@ def runMonoWith (F : Lambda.Factory CoreLParams) (p : Program) :
   | (.error _, _) => none
 
 /-- The pass, run a second time, from the transform state of the first run. The result is `none` when the
-    second run raises a diagnostic. A diagnostic on the *first* run is an absence of a claim, and a diagnostic
-    on the second run is a counterexample. Therefore `checkMonoIdempotent` asks that this result is not
-    `none`. -/
+    second run raises a diagnostic. A diagnostic on the *first* run is an absence of a claim. -/
 def runMonoAgain (r : (Bool × Program) × Transform.CoreTransformState) :
     Option (Bool × Program) :=
   match Transform.runWith r.1.2 monoPhase.transform r.2 with
@@ -256,7 +254,7 @@ partial def stmtOpNamesDeep (ss : List Statement) : List String :=
       | .assume _ e _ => opNames e
       | .cover _ e _ => opNames e
       | _ => []
-    | .cmd (.call _ args _) =>
+    | .cmd (.call _ _ args _) =>
       args.flatMap fun | .inArg e => opNames e | _ => []
     | .block _ b _ => stmtOpNamesDeep b
     | .ite c t e _ =>
@@ -316,8 +314,8 @@ def allOpNames (p : Program) : List String :=
 /-! ## The three claims of the tests of Strata, over the generator
 
 The three predicates that the tests of Strata assert on each of their fourteen examples, together with
-idempotence. Each of them holds with no guard, except `checkMonoOutputTypechecks`, whose claim needs a
-well-typed input. -/
+the claim about a second run. Each of them holds with no guard, except `checkMonoOutputTypechecks`,
+whose claim needs a well-typed input. -/
 
 /-- **No top-level function declaration keeps its type parameters.** This is the main postcondition of the
     pass, and it is the reason that the encoder for SMT can assume a monomorphic input.
@@ -353,19 +351,24 @@ abbrev checkMonoOutputTypechecks (p : Program) : Prop :=
         (Core.typeCheck Core.VerifyOptions.quiet r.1.2
           (factory := r.2.factory)).toOption.isSome = true
 
-/-- **The pass is idempotent, and it reports so.** After one run, each function is monomorphic. Therefore the
-    second run has nothing to specialize, it must give the same program, and it must report `changed = false`.
+/-- Whether a run of the pass created a specialized copy, a function named `$__mono#…`, in the
+    program or in the factory of the final state. -/
+def monoCreatedCopy (r : (Bool × Program) × Transform.CoreTransformState) : Bool :=
+  (programFuncs r.1.2).any (fun f => (demangleFuncName f.name.name).isSome) ||
+    r.2.factory.toArray.any (fun f => (demangleFuncName f.name.name).isSome)
 
-    The second run starts from the state of the *first* run, and not from a fresh state. A second seed of
-    `Core.Factory` would give the second run the polymorphic originals of the factory that the first run
-    dropped. The second run would then specialize them again, and the property would measure this module and
-    not the pass.
+/-- **A second run of the pass is rejected after a run that created a copy, and it changes nothing
+    otherwise.** The pass rejects an input that names a function `$__mono#…`, so it runs at most
+    once per pipeline. If the first run created a specialized copy, the second run must raise a
+    diagnostic. If it created none, the second run must give the same program and report
+    `changed = false`.
 
-    The part of the claim that says the second run gives a result is necessary. A bounded `∀` over that result
-    alone would read a diagnostic on the *second* run as an absence of a claim, and a second run that fails
-    where the first run succeeded breaks idempotence. -/
-abbrev checkMonoIdempotent (p : Program) : Prop :=
-  (runMono p).bind runMonoAgain = (monoOut p).map (fun p' => (false, p'))
+    The second run starts from the state of the *first* run, and not from a fresh state. A second
+    seed of `Core.Factory` would give the second run the polymorphic originals of the factory that
+    the first run dropped, and the property would measure this module and not the pass. -/
+abbrev checkMonoSecondRun (p : Program) : Prop :=
+  ∀ r ∈ runMono p,
+    runMonoAgain r = if monoCreatedCopy r then none else some (false, r.1.2)
 
 /-- **No reference to a dropped polymorphic original survives anywhere**, over every
     expression of the output.

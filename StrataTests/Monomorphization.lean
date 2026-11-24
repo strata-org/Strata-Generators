@@ -12,7 +12,8 @@ def monoProperties : List TestDecl :=
         -- The pass gives a program, or it raises a diagnostic. One property scores that choice, here,
         -- so that a diagnostic cannot silently empty each property below.
         [ ("mono: the pass returns a program", fun gp => checkMonoSucceeds gp.prog),
-        -- The three claims of the tests of Strata, over the generator, together with idempotence.
+        -- The three claims of the tests of Strata over the generator, and the claim about
+        -- a second run.
         ("mono: no top-level function keeps its type parameters",
             fun gp => checkMonoAllFuncsMonomorphic gp.prog),
         ("mono: no factory entry keeps its type parameters",
@@ -21,10 +22,9 @@ def monoProperties : List TestDecl :=
             .knownFailure "the monomorphized output of a polymorphic procedure fails to \
               re-typecheck, with or without `inout` parameters (one shrunk counterexample is \
               `procedure nx<P, Hh, iU> (K : string, wf : real, Os : Map real iU, out PQuaJ : \
-              real) {}`); failed on 6 of 6 runs on 2026-11-11. Likely the same `$__ty0` checker \
-              defect as the witness `mono: a polymorphic procedure with an inout parameter and a \
-              type-parameter output re-typechecks after the pass`"),
-        ("mono: monomorphization pass is idempotent", fun gp => checkMonoIdempotent gp.prog),
+              real) {}`)"),
+        ("mono: a second run is rejected after a copy and changes nothing otherwise",
+            fun gp => checkMonoSecondRun gp.prog),
         -- A reference to a dropped polymorphic original, anywhere in the output.
         ("mono: no reference to a dropped polymorphic original survives",
             fun gp => checkMonoNoPolyRefsSurvive gp.prog),
@@ -61,13 +61,9 @@ private def polyInoutOutProcDecl : Decl :=
     `mono: output of monomorphization typechecks`, which a draw falsifies only sometimes. -/
 @[strata_property]
 def monoPolyInoutOutputTypechecks : TestDecl :=
-  knownFailure "on a polymorphic procedure with an inout parameter and an output of a \
-    type-parameter type, Core's `Program.typeCheck` gives the output a type variable in its \
-    reserved namespace (`$__ty0`), and re-checking the monomorphized output rejects that \
-    name; the same checker defect as the inout re-typecheck property" <|
-    TestDecl.witness "mono: a polymorphic procedure with an inout parameter and a \
-      type-parameter output re-typechecks after the pass"
-      (decide (checkMonoOutputTypechecks { decls := [polyInoutOutProcDecl] }))
+  TestDecl.witness "mono: a polymorphic procedure with an inout parameter and a \
+    type-parameter output re-typechecks after the pass"
+    (decide (checkMonoOutputTypechecks { decls := [polyInoutOutProcDecl] }))
 
 /-- The two specialization properties, checked a second time under a distribution that makes a
     polymorphic function common. `MonomorphizeFunctions` is the identity on a program that declares

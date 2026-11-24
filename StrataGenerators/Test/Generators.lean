@@ -65,6 +65,8 @@ private def exprKind : LExpr' → String
   | .const _ (.strConst _) => "strConst"
   | .const _ (.rationalConst _) => "realConst"
   | .const _ (.bitvecConst _ _) => "bitvecConst"
+  | .const _ (.mapConst ..) => "mapConst"
+  | .const _ (.sequenceConst ..) => "sequenceConst"
   | .quant _ _ _ _ _ _ => "quant"
 
 /-- The name of the constructor at the top of a type. -/

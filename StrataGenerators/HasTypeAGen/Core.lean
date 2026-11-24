@@ -37,14 +37,20 @@ open Lambda RandomChoice ArbNat ArbChar ArbString
 
 -- ── Parameter types ──────────────────────────────────────────────────
 
-/-- The base `LExprParams` of this package: unit metadata and unit identifier metadata. -/
-abbrev LExprParams' : LExprParams := ⟨Unit, Unit⟩
+/-- The location carried by every expression node the generators build. It is Core's own
+    location for synthesized expressions, so a node built here agrees with the nodes that Core
+    operations such as `HasFvar.mkFvar` build. -/
+abbrev genLoc : ExprSourceLoc := Core.coreLoc
+
+/-- The base `LExprParams` of this package: Core's source-location metadata and unit
+    identifier metadata. -/
+abbrev LExprParams' : LExprParams := Core.CoreLParams
 /-- The full `LExprParamsT`, which uses `LMonoTy` as the type of an annotation. -/
 abbrev LExprParamsT' : LExprParamsT := LExprParams.mono LExprParams'
 
 instance : DecidableEq Unit := instDecidableEqPUnit
 
-/-- The expression type of this package: an `LExpr` with unit metadata and monotype annotations. -/
+/-- The expression type of this package: an `LExpr` with Core metadata and monotype annotations. -/
 abbrev LExpr' := LExpr LExprParamsT'
 
 instance : BEq LMonoTy := instBEqOfDecidableEq
@@ -184,7 +190,7 @@ where
 /-- Draw a uniformly random bound variable of the type `τ` from `bctx`. -/
 def pickBVar [Gen G] (bctx : BVarCtx) (τ : LMonoTy)
     (h : (bvarsOfType bctx τ).length > 0) : G LExpr' :=
-  have hne : (bvarsOfType bctx τ).map (LExpr.bvar () ·) ≠ [] := by
+  have hne : (bvarsOfType bctx τ).map (LExpr.bvar genLoc ·) ≠ [] := by
     simp [List.map_eq_nil_iff]
     exact List.length_pos_iff.mp h
   elements _ hne
@@ -197,7 +203,7 @@ def fvarsOfType (fctx : FVarCtx) (τ : LMonoTy) : List String :=
     annotation `(some τ)`, so `HasTypeA` can type check it with no external environment. -/
 def pickFVar [Gen G] (fctx : FVarCtx) (τ : LMonoTy)
     (h : (fvarsOfType fctx τ).length > 0) : G LExpr' :=
-  have hne : (fvarsOfType fctx τ).map (fun name => LExpr.fvar () ⟨name, ()⟩ (some τ)) ≠ [] := by
+  have hne : (fvarsOfType fctx τ).map (fun name => LExpr.fvar genLoc ⟨name, ()⟩ (some τ)) ≠ [] := by
     simp [List.map_eq_nil_iff]
     exact List.length_pos_iff.mp h
   elements _ hne
@@ -231,7 +237,7 @@ theorem opsOfType_empty (τ : LMonoTy) : opsOfType ∅ τ = [] := by
 /-- Draw a uniformly random operator of the type `τ` from `octx`. -/
 def pickOp [Gen G] (octx : OpCtx) (τ : LMonoTy)
     (h : (opsOfType octx τ).length > 0) : G LExpr' :=
-  have hne : (opsOfType octx τ).map (fun name => LExpr.op () ⟨name, ()⟩ (some τ)) ≠ [] := by
+  have hne : (opsOfType octx τ).map (fun name => LExpr.op genLoc ⟨name, ()⟩ (some τ)) ≠ [] := by
     simp [List.map_eq_nil_iff]
     exact List.length_pos_iff.mp h
   elements _ hne
@@ -329,13 +335,13 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
 
 /-- Generate a random boolean constant, which is `true` or `false`. -/
 @[reducible] def genBoolConst [Gen G] : G LExpr' :=
-  oneOf [fun () => pure (.boolConst () true),
-         fun () => pure (.boolConst () false)]
+  oneOf [fun () => pure (.boolConst genLoc true),
+         fun () => pure (.boolConst genLoc false)]
 
 /-- Generate a random integer constant. The value can be negative or not negative. -/
 @[reducible] def genIntConst [Gen G] : G LExpr' :=
-  oneOf [fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)),
-         fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))]
+  oneOf [fun () => do let k ← Nat.arbitrary; pure (.intConst genLoc (k : Int)),
+         fun () => do let k ← Nat.arbitrary; pure (.intConst genLoc (-(↑k + 1 : Int)))]
 
 /-- The list of characters that `String.arbitrary` of Basalt draws from. -/
 abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
@@ -350,13 +356,13 @@ abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
     at type `string`. An ASCII-only pool cannot reach the defect in the SMT-LIB
     escape function.
 
-    The support proofs depend on the shape `do let s ← _; pure (.strConst () s)`. Each such proof
-    takes the shape apart as one `bind` and then one `pure`, and it discards the inner membership
-    hypothesis. Therefore a proof does not depend on *which* generator gives the string, but it does
-    depend on the shape. -/
+    The support proofs depend on the shape `do let s ← _; pure (.strConst genLoc s)`. Each such
+    proof takes the shape apart as one `bind` and then one `pure`, and it discards the inner
+    membership hypothesis. Therefore a proof does not depend on *which* generator gives the string,
+    but it does depend on the shape. -/
 @[reducible] def genStrConst [Gen G] : G LExpr' := do
   let s ← StrataGenerators.PrimitiveGens.genInterestingString
-  pure (.strConst () s)
+  pure (.strConst genLoc s)
 
 /-- Generate a random rational constant.
 
@@ -371,7 +377,7 @@ abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
     `genStrConst`. -/
 @[reducible] def genRealConst [Gen G] : G LExpr' := do
   let r ← StrataGenerators.PrimitiveGens.genRat
-  pure (.rationalConst () r)
+  pure (.rationalConst genLoc r)
 
 /-- Generate a random bitvector constant of width `n`.
 
@@ -390,7 +396,7 @@ abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
     `bind` and then one `pure`. Read `genStrConst`. -/
 @[reducible] def genBitvecConst [Gen G] (n : Nat) : G LExpr' := do
   let k ← StrataGenerators.PrimitiveGens.genBiasedBitVec n
-  pure (.bitvecConst () n k)
+  pure (.bitvecConst genLoc n k)
 
 /-- Generate an application. The generator draws a random argument type. It then generates the
     argument, and a function from that type to `τ`, and it applies the function to the argument. -/
@@ -399,19 +405,19 @@ abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
   let τ' ← genTy
   let arg ← genExpr τ'
   let fn ← genExpr (.arrow τ' τ)
-  pure (.app () fn arg)
+  pure (.app genLoc fn arg)
 
 /-- Generate a lambda abstraction whose binder has the type `τ₁`. -/
 @[reducible] def genAbs [Gen G] (genBody : G LExpr') (τ₁ : LMonoTy) : G LExpr' := do
   let body ← genBody
-  pure (.abs () "" (some τ₁) body)
+  pure (.abs genLoc "" (some τ₁) body)
 
 /-- Generate an `if-then-else` expression. -/
 @[reducible] def genIte [Gen G] (genCond genThen genElse : G LExpr') : G LExpr' := do
   let c ← genCond
   let t ← genThen
   let e ← genElse
-  pure (.ite () c t e)
+  pure (.ite genLoc c t e)
 
 /-- Generate an equality test. The generator draws a random type, and it then generates two
     expressions of that type. -/
@@ -419,7 +425,7 @@ abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
   let τ' ← genTy
   let e₁ ← genExpr τ'
   let e₂ ← genExpr τ'
-  pure (.eq () e₁ e₂)
+  pure (.eq genLoc e₁ e₂)
 
 /-- Generate a quantifier expression, which is a `∀` or a `∃`.
 
@@ -432,7 +438,7 @@ abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
   let τ_trigger ← genTy
   let trigger ← genTrigger τ' τ_trigger
   let body ← genBody τ'
-  pure (.quant () k "" (some τ') trigger body)
+  pure (.quant genLoc k "" (some τ') trigger body)
 
 /-- Each syntactic subtype of a type, which is each subterm of the type expression. -/
 def syntacticSubtypes : LMonoTy → List LMonoTy
@@ -714,7 +720,7 @@ def genAppArgTy [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifi
 
 /-- Build an application that nests to the left, such as `app (app base a₁) a₂`. -/
 def mkApps (base : LExpr') (args : List LExpr') : LExpr' :=
-  args.foldl (fun acc arg => .app () acc arg) base
+  args.foldl (fun acc arg => .app genLoc acc arg) base
 
 -- ── The helpers for the IndirPoly rule ──────────────────────────────
 
@@ -942,7 +948,7 @@ def genIndir [Gen G] (octx : OpCtx) (τ : LMonoTy)
   let (name, argTys) ← elements ops (by apply List.ne_nil_of_length_pos; assumption)
   -- Construct the `LExpr` corresponding to the chosen `op`
   let fullArrowTy := argTys.foldr (fun σ acc => .arrow σ acc) τ
-  let opExpr := .op () ⟨name, ()⟩ (some fullArrowTy)
+  let opExpr := .op genLoc ⟨name, ()⟩ (some fullArrowTy)
   -- Iterate through the argument types in order
   -- and generate successive random terms of those types
   let args ← List.mapM genArg argTys
@@ -1001,7 +1007,7 @@ def genIndirPolyCore [Gen G] (fctx : FVarCtx) (octx : OpCtx)
     -- There are no quantified type variables in the annotated type (although it may contain free type variables
     -- which appear in the context)
     let fullArrowTy := argTys.foldr (fun σ acc => .arrow σ acc) τ
-    let opExpr : LExpr' := .op () ⟨functionName, ()⟩ (some fullArrowTy)
+    let opExpr : LExpr' := .op genLoc ⟨functionName, ()⟩ (some fullArrowTy)
 
     -- For each argument, generate a random term of that type
     let args ← argTys.mapM genArg

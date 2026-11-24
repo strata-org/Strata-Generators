@@ -115,7 +115,7 @@ def AlphabetOkE (tvars : List TyIdentifier) : Statement → Prop
   | .cmd (CmdExt.cmd (.assert l _ _)) => l ∈ SPMF.support (genIdentName (G := SPMF))
   | .cmd (CmdExt.cmd (.assume l _ _)) => l ∈ SPMF.support (genIdentName (G := SPMF))
   | .cmd (CmdExt.cmd (.cover l _ _)) => l ∈ SPMF.support (genIdentName (G := SPMF))
-  | .cmd (CmdExt.call _ _ _) => True
+  | .cmd (CmdExt.call _ _ _ _) => True
   | .block label body _ =>
       label ∈ SPMF.support (genIdentName (G := SPMF)) ∧ AlphabetOkEList tvars body
   | .ite _ t e _ => AlphabetOkEList tvars t ∧ AlphabetOkEList tvars e
@@ -167,7 +167,7 @@ theorem alphabetOkE_eventually : ∀ (s : Statement), AlphabetOkE tvars s → Al
     ⟨0, .of_forall fun _ _ _ => by simpa [AlphabetOk, AlphabetOkE] using h⟩
   | .cmd (CmdExt.cmd (.cover _ _ _)), h =>
     ⟨0, .of_forall fun _ _ _ => by simpa [AlphabetOk, AlphabetOkE] using h⟩
-  | .cmd (CmdExt.call _ _ _), _ => ⟨0, .of_forall fun _ _ _ => by simp [AlphabetOk]⟩
+  | .cmd (CmdExt.call _ _ _ _), _ => ⟨0, .of_forall fun _ _ _ => by simp [AlphabetOk]⟩
   | .block _ body _, ⟨hl, hb⟩ => by
     obtain ⟨K, N, h⟩ := (alphabetOkEList_eventually body hb).nested
     refine ⟨K, N + 1, fun n hn k hk => ?_⟩
@@ -218,7 +218,7 @@ mutual
     nested body is checked in its own scope only. -/
 def ExprOkE (ctx : VarCtx) : Statement → Prop
   | .cmd (CmdExt.cmd c) => CmdExprOkE (octx := octx) (tvars := tvars) (pctx := pctx) ctx c
-  | .cmd (CmdExt.call _ _ _) => True
+  | .cmd (CmdExt.call _ _ _ _) => True
   | .block _ body _ => ExprOkEList ctx body
   | .ite cond t e _ =>
       (∀ g, cond = .det g → ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx .bool g) ∧
@@ -276,7 +276,7 @@ theorem exprOkE_eventually : ∀ (ctx : VarCtx) (s : Statement),
     ExprOkE (octx := octx) (tvars := tvars) (pctx := pctx) ctx s →
       Eventually fun n => ExprOk (octx := octx) (tvars := tvars) (pctx := pctx) ctx n s
   | ctx, .cmd (CmdExt.cmd c), h => cmdExprOkE_eventually ctx c h
-  | _, .cmd (CmdExt.call _ _ _), _ => .of_forall fun _ => trivial
+  | _, .cmd (CmdExt.call _ _ _ _), _ => .of_forall fun _ => trivial
   | ctx, .block _ body _, h => (exprOkEList_eventually ctx body h).pred
   | ctx, .ite cond t e _, ⟨hg, ht, he⟩ =>
     ((guard_eventually cond hg).and ((exprOkEList_eventually ctx t ht).pred.and
@@ -302,7 +302,7 @@ mutual
 /-- `CallOk` with `ExprReach` in place of reachability at one depth for the by-value inputs. Every
     other clause of the call recipe is unchanged. -/
 def CallOkE (imm : List (Identifier Unit)) (procs : ProcSigCtx) (ctx : VarCtx) : Statement → Prop
-  | .cmd (CmdExt.call pname args _) =>
+  | .cmd (CmdExt.call pname tyArgs args _) =>
       ∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr)
         (mask : List Bool),
         s ∈ procs ∧
@@ -316,6 +316,7 @@ def CallOkE (imm : List (Identifier Unit)) (procs : ProcSigCtx) (ctx : VarCtx) :
         args = StrataGenerators.Stmt.mkArgs s.M
           (outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
           exprs mask ∧
+        tyArgs = callTyArgs s.typeArgs (s.typeArgs.zip σvals) ∧
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).all (usableName imm ctx) = true ∧
         List.Forall₂ (fun e τ => ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx τ e)
           exprs (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.I).values
@@ -337,8 +338,8 @@ theorem callOkE_eventually (imm : List (Identifier Unit)) (procs : ProcSigCtx) :
     ∀ (ctx : VarCtx) (s : Statement),
       CallOkE (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx s →
       Eventually fun n => CallOk (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx n s
-  | _, .cmd (CmdExt.call _ _ _), ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h₆⟩ =>
-    (Eventually.forall₂ h₆).mono fun _ h => ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h⟩
+  | _, .cmd (CmdExt.call _ _ _ _), ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h₆, h₇⟩ =>
+    (Eventually.forall₂ h₇).mono fun _ h => ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h₆, h⟩
   | _, .cmd (CmdExt.cmd _), _ => .of_forall fun _ => trivial
   | ctx, .block _ body _, h => (callOkEList_eventually imm procs ctx body h).pred
   | ctx, .ite _ t e _, ⟨ht, he⟩ =>

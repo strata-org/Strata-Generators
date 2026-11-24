@@ -124,7 +124,7 @@ where
       | .ok C' => go C' rest
       | .error _ => false
     | .type (.data block) _ :: rest =>
-      match @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+      match @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit _
           _ C block with
       | .ok C' => go C' rest
       | .error _ => false

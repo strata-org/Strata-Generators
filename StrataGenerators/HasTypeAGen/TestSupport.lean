@@ -48,6 +48,8 @@ def ppExpr (e : LExpr') (prec : Nat := 0) : String :=
   | .const _ (.strConst s) => s!"\"{s}\""
   | .const _ (.rationalConst r) => s!"#{r}"
   | .const _ (.bitvecConst _ b) => s!"#{b.toNat}"
+  | .const _ (.mapConst ..) => "mapConst"
+  | .const _ (.sequenceConst ..) => "sequenceConst"
   | .op _ o _ => s!"{o.name}"
   | .bvar _ i => s!"%{i}"
   | .fvar _ x ty => match ty with
@@ -266,20 +268,20 @@ partial def shrinkLExpr (e : LExpr') : List LExpr' :=
   immediateSubtermsWithoutBinders e ++
   match e with
   | .app _ fn arg =>
-    (.app () · arg) <$> shrinkLExpr fn ++
-    (.app () fn ·) <$> shrinkLExpr arg
+    (.app genLoc · arg) <$> shrinkLExpr fn ++
+    (.app genLoc fn ·) <$> shrinkLExpr arg
   | .ite _ c t el =>
-    (.ite () · t el) <$> shrinkLExpr c ++
-    (.ite () c · el) <$> shrinkLExpr t ++
-    (.ite () c t ·) <$> shrinkLExpr el
+    (.ite genLoc · t el) <$> shrinkLExpr c ++
+    (.ite genLoc c · el) <$> shrinkLExpr t ++
+    (.ite genLoc c t ·) <$> shrinkLExpr el
   | .eq _ e1 e2 =>
-    (.eq () · e2) <$> shrinkLExpr e1 ++
-    (.eq () e1 ·) <$> shrinkLExpr e2
+    (.eq genLoc · e2) <$> shrinkLExpr e1 ++
+    (.eq genLoc e1 ·) <$> shrinkLExpr e2
   | .abs _ name ty body =>
-    (.abs () name ty ·) <$> shrinkLExpr body
+    (.abs genLoc name ty ·) <$> shrinkLExpr body
   | .quant _ k name ty trigger body =>
-    (.quant () k name ty · body) <$> shrinkLExpr trigger ++
-    (.quant () k name ty trigger ·) <$> shrinkLExpr body
+    (.quant genLoc k name ty · body) <$> shrinkLExpr trigger ++
+    (.quant genLoc k name ty trigger ·) <$> shrinkLExpr body
   | .const _ (.intConst i) =>
-    (fun i' => .const () (.intConst i')) <$> Plausible.Shrinkable.shrink i
+    (fun i' => .const genLoc (.intConst i')) <$> Plausible.Shrinkable.shrink i
   | _ => []

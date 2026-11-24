@@ -125,7 +125,7 @@ def stmtKind : Statement → String
     the construct under test. -/
 def hasKleeneUnsupported (ss : List Statement) : Bool :=
   countStmtsByList
-    (fun | .exit _ _ | .typeDecl _ _ | .cmd (.call _ _ _) => true
+    (fun | .exit _ _ | .typeDecl _ _ | .cmd (.call _ _ _ _) => true
          | _ => false) ss != 0
 
 /-- Whether a statement list contains any `loop` node carrying a non-empty
@@ -148,7 +148,7 @@ open Imperative
 
 /-- A trivial `assert true` command statement (a leaf, no loops/exits/etc.). -/
 private def leafStmt : Statement :=
-  Statement.assert "l" (.const () (.boolConst true)) .empty
+  Statement.assert "l" (.const genLoc (.boolConst true)) .empty
 
 /-- A loop whose body is a single leaf, wrapped in a block: 1 loop, 0 exits. -/
 private def loopInBlock : Statement :=
@@ -167,7 +167,7 @@ private def typeDeclStmt : Statement :=
 
 /-- A loop carrying one invariant (so `StmtToKleeneStmt` rejects it). -/
 private def invLoop : Statement :=
-  .loop .nondet none [("i", .const () (.boolConst true))] [] .empty
+  .loop .nondet none [("i", .const genLoc (.boolConst true))] [] .empty
 
 #guard countLoopsStmts [leafStmt] == 0
 #guard countLoopsStmts [loopInBlock] == 1
@@ -249,7 +249,7 @@ mutual
     (unreachable for generated statements). -/
 def toCmdStmt : Statement → Option (Stmt Expression (Cmd Expression))
   | .cmd (.cmd c) => some (.cmd c)
-  | .cmd (.call _ _ _) => none
+  | .cmd (.call _ _ _ _) => none
   | .block label body md => (fun b => .block label b md) <$> toCmdStmts body
   | .ite cond thenb elseb md => do
       let t ← toCmdStmts thenb
@@ -293,8 +293,8 @@ end
 -- The round trip really is the identity on the shapes the generator makes, which
 -- is what lets a `Cmd P`-shaped pass be lifted to a `Program` without changing
 -- anything the pass did not touch.
-#guard (toCmdStmts [Statement.assert "a" (.const () (.boolConst true)) .empty]).map
-  ofCmdStmts == some [Statement.assert "a" (.const () (.boolConst true)) .empty]
+#guard (toCmdStmts [Statement.assert "a" (.const genLoc (.boolConst true)) .empty]).map
+  ofCmdStmts == some [Statement.assert "a" (.const genLoc (.boolConst true)) .empty]
 
 /-- The transform from a deterministic statement list to a Kleene statement. The result is `none` if and only
     if the list holds a construct that has no counterpart in the Kleene form. Such a construct is an `exit`, a
@@ -594,7 +594,7 @@ mutual
 partial def shrinkStmt : Statement → List Statement
   | .cmd (.cmd c) => (fun c' => .cmd (.cmd c')) <$> shrinkCmd c
   -- Procedure calls are unreachable from the generator; nothing to shrink.
-  | .cmd (.call _ _ _) => []
+  | .cmd (.call _ _ _ _) => []
   | .block label body md =>
     (.block label · md) <$> shrinkStmtsList body
   | .ite cond thenb elseb md =>

@@ -296,7 +296,7 @@ def genDeclDatatype [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   -- `DeclHasType'.type_data` fixes), so a gated `= .ok C'` matches the spec
   -- constructor with no instance-diamond bridge in the proof.
   if block.all (fun d => isAllowedName d.name && !StrataGenerators.Stmt.isLocalTypeName d.name) then
-  match @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+  match @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit _
       _ s.C block with
   | .ok C' =>
     let names := block.map (·.name)

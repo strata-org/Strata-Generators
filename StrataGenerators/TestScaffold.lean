@@ -919,7 +919,7 @@ def printResolveErrors (numTrials maxSize : Nat) : IO Nat := do
   for i in List.range attempts do
     let size := i % (maxSize + 1)
     let te ← try Plausible.Gen.run (Arbitrary.arbitrary (α := ResolveTypedExpr)) size
-             catch _ => pure ⟨.const () (.boolConst true), .bool⟩
+             catch _ => pure ⟨.const genLoc (.boolConst true), .bool⟩
     match resolveErrorMessage te with
     | none => pure ()
     | some msg =>

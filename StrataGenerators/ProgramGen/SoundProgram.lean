@@ -31,7 +31,7 @@ namespace ProgramGen
 /-- A successful `addMutualBlock` leaves `rigidTypeVars` unchanged (it only grows
     `datatypes`/`knownTypes`/`functions`). -/
 theorem addMutualBlock_rigid {C C' : LContext CoreLParams} {block : MutualDatatype Unit}
-    (h : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+    (h : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit _
       _ C block = .ok C') :
     C'.rigidTypeVars = C.rigidTypeVars := by
   unfold LContext.addMutualBlock at h

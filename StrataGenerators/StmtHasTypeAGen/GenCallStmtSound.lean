@@ -1,6 +1,6 @@
 import StrataGenerators.CmdHasTypeAGen
 import StrataGenerators.StmtHasTypeAGen.CallDefs
-import Strata.Languages.Core.StatementTypeSpec
+import Strata.Languages.Core.Typing.Spec.StatementTypeSpec
 import Strata.Languages.Core.Typing.Spec.TypingSpec
 import Strata.Languages.Core.CallWFProps
 
@@ -236,7 +236,7 @@ theorem filterMap_mergeBy_right {α β : Type} (f : α → Option β) (bs : List
 -- `inoutArg` with either other kind is visible. That is why `mask` merges the
 -- by-value inputs with the out targets, and why the in-out block still has to lead.
 section
-private def gcaExpr : Expression.Expr := LExpr.const () (.intConst 1)
+private def gcaExpr : Expression.Expr := LExpr.const genLoc (.intConst 1)
 private def gcaY : Identifier Unit := ⟨"y", ()⟩
 private def gcaZ : Identifier Unit := ⟨"z", ()⟩
 private abbrev GcaArgs := List (CallArg Expression)
@@ -261,14 +261,14 @@ end
 theorem getIn_mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
     (mask : List Bool) :
     CallArg.getInputExprs (mkArgs M T exprs mask)
-      = M.map (fun p => LExpr.fvar () p.1 none) ++ exprs := by
+      = M.map (fun p => LExpr.fvar genLoc p.1 none) ++ exprs := by
   rw [mkArgs, CallArg.getInputExprs, Calls.getInputExprs, List.filterMap_append,
     filterMap_mergeBy_left _ mask _ _
       (by rintro a ha; obtain ⟨p, _, rfl⟩ := List.mem_map.mp ha; rfl)]
   congr 1
   · induction M with
     | nil => rfl
-    | cons hd tl ih => exact congrArg (LExpr.fvar () hd.1 none :: ·) ih
+    | cons hd tl ih => exact congrArg (LExpr.fvar genLoc hd.1 none :: ·) ih
   · simp only [List.filterMap_map, Function.comp_def, List.filterMap_some]
 
 /-- `getLhs (mkArgs M T exprs mask)` is the LHS (assignable) positions: the in-out
@@ -603,7 +603,7 @@ theorem argsMatch_mkArgs {proc : Procedure} (M I O T : @LMonoTySignature Unit)
   have hkM : M.keys.length = (M.map (fun p => CallArg.inoutArg (P := Expression) p.1)).length := by
     rw [ListMap.keys.length]
     exact (List.length_map ..).symm
-  have hfvM : (M.map (fun p => (LExpr.fvar () p.1 none : Expression.Expr))).length = M.length :=
+  have hfvM : (M.map (fun p => (LExpr.fvar genLoc p.1 none : Expression.Expr))).length = M.length :=
     List.length_map ..
   refine ⟨?_, ?_, ?_, ?_⟩
   · rw [getIn_mkArgs, hInputs, List.length_append, hfvM, hExLen, lm_length_append]
@@ -682,7 +682,10 @@ theorem call_recipe_inout_sound
       (M ++ O).keys.contains (I.keys[i]'(by simpa using hi)) = false)
     (hMnotO : ∀ k ∈ M.keys, k ∉ O.keys)
     (hLhsNodup : (M.keys ++ T.keys).Nodup) :
-    CmdExtWellTyped C P ts (CmdExt.call pname (mkArgs M T exprs mask) md) ts := by
+    CmdExtWellTyped C P ts
+      (CmdExt.call pname
+        (callTyArgs proc.header.typeArgs σ)
+        (mkArgs M T exprs mask) md) ts := by
   -- length facts
   have hkeysM : M.keys.length = M.length := ListMap.keys.length
   have hvalsM : M.values.length = M.length := lm_values_length M
@@ -701,7 +704,7 @@ theorem call_recipe_inout_sound
     WF.WFcallProp.of_argsMatch hfind
       (argsMatch_mkArgs M I O T exprs mask hInputs hOutputs hExLen hTLen hInotMO hMnotO)
       (by rw [hgetLhs]; exact hLhsNodup)
-  refine .call ts pname (mkArgs M T exprs mask) proc md σ ts hfind hwf ?_ ?_ ?_
+  refine .call ts pname _ (mkArgs M T exprs mask) proc md σ ts hfind hwf ?_ ?_ ?_ rfl
     (Strata.Util.HMaps.Equiv.refl ts)
   · -- every written-to variable is in scope
     intro v hv
@@ -721,17 +724,18 @@ theorem call_recipe_inout_sound
     intro i hi hj
     simp only [hgetIn] at hi ⊢
     simp only [hInputs, lm_values_append] at hj ⊢
-    have hmaplen : (List.map (fun p => (LExpr.fvar () p.1 none : Expression.Expr)) M).length
+    have hmaplen : (List.map (fun p => (LExpr.fvar genLoc p.1 none : Expression.Expr)) M).length
         = M.length := List.length_map ..
     by_cases hlt : i < M.length
-    · -- in-out block: the argument is the bare fvar `fvar () M[i].1 none`.
+    · -- in-out block: the argument is the bare fvar `fvar genLoc M[i].1 none`.
       have hidxM : i < M.values.length := by rw [hvalsM]; exact hlt
       have hidxK : i < M.keys.length := by rw [hkeysM]; exact hlt
-      have harg : (List.map (fun p => LExpr.fvar () p.1 none) M ++ exprs)[i]
-          = LExpr.fvar () (M.keys[i]'hidxK) none := by
+      have harg : (List.map (fun p => LExpr.fvar genLoc p.1 none) M ++ exprs)[i]
+          = LExpr.fvar genLoc (M.keys[i]'hidxK) none := by
         simp only [List.getElem_append_left (by rw [hmaplen]; exact hlt), ListMap.keys_eq_map_fst]
         exact (List.getElem_map _).trans
-          (congrArg (fun x => (LExpr.fvar () x none : Expression.Expr)) (List.getElem_map _).symm)
+          (congrArg (fun x => (LExpr.fvar genLoc x none : Expression.Expr))
+            (List.getElem_map _).symm)
       have hval : (M.values ++ I.values)[i]'hj = M.values[i]'hidxM :=
         List.getElem_append_left hidxM
       rw [harg, hval]
@@ -740,7 +744,7 @@ theorem call_recipe_inout_sound
       have hge : M.length ≤ i := Nat.le_of_not_lt hlt
       have hiex : i - M.length < exprs.length := by
         rw [List.length_append, hmaplen] at hi; omega
-      have harg : (List.map (fun p => LExpr.fvar () p.1 none) M ++ exprs)[i]
+      have harg : (List.map (fun p => LExpr.fvar genLoc p.1 none) M ++ exprs)[i]
           = exprs[i - M.length]'hiex := by
         rw [List.getElem_append_right (by rw [hmaplen]; exact hge)]
         congr 1
@@ -862,8 +866,9 @@ theorem cmdExtWellTyped_equiv_congr {C : LContext CoreLParams} {P : Program}
   have hm : ∀ x v, ts.find? x = some v → ts₂.find? x = some v := fun x _ hx => (hf x).trans hx
   cases h with
   | cmd c _ hc => exact .cmd ts₂ c _ (cmdWellTyped_equiv_congr hc he)
-  | call pname callArgs proc md σ _ hfind hwf hlhs hargs hlhsTy heq =>
-    refine .call ts₂ pname callArgs proc md σ _ hfind hwf ?_ ?_ ?_ (heq.trans he.symm)
+  | call pname tyArgs callArgs proc md σ _ hfind hwf hlhs hargs hlhsTy htyArgs heq =>
+    refine .call ts₂ pname tyArgs callArgs proc md σ _ hfind hwf ?_ ?_ ?_ htyArgs
+      (heq.trans he.symm)
     · intro v hv
       rw [hf v]
       exact hlhs v hv
@@ -1064,7 +1069,9 @@ theorem call_mixed_body_sound
     (hwk : ∀ p ∈ (substSig σ M ++ T).toList, C.WellKindedTy p.2) :
     StatementsWellTyped P C ts L
       (initChain (missingIn ts (substSig σ M ++ T)) ++
-        [Statement.call pname (mkArgs M T exprs mask) default]) C
+        [Statement.call pname
+          (callTyArgs proc.header.typeArgs σ)
+          (mkArgs M T exprs mask) default]) C
       (insertAll ts (missingIn ts (substSig σ M ++ T))) := by
   have hExNoFvar : ∀ i (hi : i < exprs.length) m x, (exprs[i]'hi) ≠ LExpr.fvar m x none := by
     intro i hi m x heq
@@ -1132,7 +1139,9 @@ theorem call_mixed_body_sound
       (fun p hp => hInScope _ (List.mem_append_right (substSig σ M).toList hp)) i hi hjOσ
     rwa [substSig_values_getElem σ O i hjOσ hj] at h
   have hcall : StatementWellTyped P C (insertAll ts (missingIn ts (substSig σ M ++ T))) L
-      (Statement.call pname (mkArgs M T exprs mask) default) C
+      (Statement.call pname
+        (callTyArgs proc.header.typeArgs σ)
+        (mkArgs M T exprs mask) default) C
       (insertAll ts (missingIn ts (substSig σ M ++ T))) :=
     .cmd C _ L _ _
       (call_recipe_inout_sound σ M I O T exprs mask hfind hInputs hOutputs hExLen

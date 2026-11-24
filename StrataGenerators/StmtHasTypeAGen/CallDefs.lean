@@ -1,4 +1,4 @@
-import Strata.Languages.Core.StatementTypeSpec
+import Strata.Languages.Core.Typing.Spec.StatementTypeSpec
 import StrataGenerators.CmdHasTypeAGen.Core
 
 open Lambda Core Imperative
@@ -51,6 +51,13 @@ instance : Inhabited ProcSig := ⟨⟨"", [], [], [], []⟩⟩
 def substSig (σ : List (TyIdentifier × LMonoTy)) (block : @LMonoTySignature Unit) :
     @LMonoTySignature Unit :=
   block.map (fun p => (p.1, LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) p.2))
+
+/-- The type arguments a call carries when it instantiates the callee's type parameters
+    `typeArgs` by `σ`. -/
+abbrev callTyArgs (typeArgs : List TyIdentifier) (σ : List (TyIdentifier × LMonoTy)) :
+    Option (List LTy) :=
+  some (typeArgs.map
+    (fun a => LTy.forAll [] (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (.ftvar a))))
 
 /-- `substSig` preserves keys (it only rewrites types). -/
 @[simp] theorem substSig_keys (σ : List (TyIdentifier × LMonoTy))

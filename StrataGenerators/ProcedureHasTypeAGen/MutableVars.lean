@@ -233,11 +233,11 @@ theorem initChain_definedVars (news : List (Identifier Unit × LMonoTy)) :
     `call` modifies its written-to names, which are
     (`getLhs_mkArgs = M.keys ++ T.keys`). -/
 theorem callGroup_modifiedVars (M T : @LMonoTySignature Unit) (pname : String)
-    (missing : List (Identifier Unit × LMonoTy))
+    (tyArgs : Option (List LTy)) (missing : List (Identifier Unit × LMonoTy))
     (exprs : List Expression.Expr) (mask : List Bool) :
     Block.modifiedVars (P := Expression)
       (StrataGenerators.Stmt.initChain missing ++
-        [Statement.call pname (StrataGenerators.Stmt.mkArgs M T exprs mask) default])
+        [Statement.call pname tyArgs (StrataGenerators.Stmt.mkArgs M T exprs mask) default])
       = M.keys ++ T.keys := by
   rw [block_modifiedVars_append, initChain_modifiedVars]
   simp only [List.nil_append, Block.modifiedVars, Stmt.modifiedVars, HasVarsImp.modifiedVars,
@@ -248,11 +248,11 @@ theorem callGroup_modifiedVars (M T : @LMonoTySignature Unit) (pname : String)
     nothing. No `block` holds those names, so they enter the scope around the group. That is why the output scope
     of the group is `insertAllCtx ctx missing`, and not the input scope. -/
 theorem callGroup_definedVars (M T : @LMonoTySignature Unit) (pname : String)
-    (missing : List (Identifier Unit × LMonoTy))
+    (tyArgs : Option (List LTy)) (missing : List (Identifier Unit × LMonoTy))
     (exprs : List Expression.Expr) (mask : List Bool) :
     Block.definedVars (P := Expression)
       (StrataGenerators.Stmt.initChain missing ++
-        [Statement.call pname (StrataGenerators.Stmt.mkArgs M T exprs mask) default]) false
+        [Statement.call pname tyArgs (StrataGenerators.Stmt.mkArgs M T exprs mask) default]) false
       = missing.map Prod.fst := by
   rw [block_definedVars_append, initChain_definedVars]
   simp only [Block.definedVars, Stmt.definedVars, HasVarsImp.definedVars, CmdExt.definedVars,

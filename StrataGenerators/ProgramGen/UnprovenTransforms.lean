@@ -745,20 +745,22 @@ def checkLoopBareAfterPass (p : Program) : Bool :=
          (stmtsLoopShapes ss).all fun (_, m, inv) => inv.isEmpty && m.isNone
      | none => true)
 
-/-- **The pass is idempotent.** The pipeline runs it to a fixed point through
-    `runProgramUntil`, so a second run must change nothing. Since the first run
-    leaves each loop bare, the second run's `insertInvariantAsserts` returns `none`
-    for each statement, and the output must equal its input.
+/-- **The transformation is idempotent.** `insertLoopInvariantAsserts` reaches its
+    fixed point in one run: a second run on the first run's output changes
+    nothing. The pipeline phase runs it once, and the phase wrapper rejects input
+    that already holds the reserved marker labels, so this check runs the
+    transformation itself, without that rejection.
 
     The comparison is full structural equality on `Program`, which the derived
     `DecidableEq` supplies. -/
 def checkLoopVcIdempotent (p : Program) : Bool :=
-    (match runPhase loopInvPhase p with
-     | some (_, out) =>
-       (match runPhase loopInvPhase out with
-        | some (_, out2) => decide (out2 = out)
-        | none => false)
-     | none => true)
+  let phase := { loopInvPhase with transform := Core.insertLoopInvariantAsserts }
+  match runPhase phase p with
+  | some (_, out) =>
+    match runPhase phase out with
+    | some (_, out2) => decide (out2 = out)
+    | none => false
+  | none => true
 
 /-- **The statistics counter is faithful.** The pass increments
     `InsertLoopInvariantAsserts.insertedAssertAssumes` by its own count of the
@@ -1077,14 +1079,14 @@ def synthesizedCalls (p : Program) : List Expression.Expr :=
     else
       -- The annotation `callOfLFunc` matches against: `in₁ → ⋯ → inₙ → out`.
       let curried := LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd)
-      let opExpr : Expression.Expr := .op () f.name (some curried)
+      let opExpr : Expression.Expr := .op genLoc f.name (some curried)
       -- One argument per formal, at the formal's own declared type. A free variable
       -- of that type is enough: the properties compare the transform's output
       -- against its input, and `substFvarsLifting` treats an fvar argument the same
       -- as any other term.
       let args := f.inputs.map fun (id, ty) =>
-        (.fvar () ⟨s!"$__arg_{id.name}", ()⟩ (some ty) : Expression.Expr)
-      some (args.foldl (fun acc a => .app () acc a) opExpr)
+        (.fvar genLoc ⟨s!"$__arg_{id.name}", ()⟩ (some ty) : Expression.Expr)
+      some (args.foldl (fun acc a => .app genLoc acc a) opExpr)
 
 /-- Every expression of a program that `inlineFuncDefs` could act on: each
     expression of each procedure body, plus each function body, each function
@@ -1884,8 +1886,8 @@ private def guardProc (name : String) (ss : List Statement) : Procedure :=
 private def guardProg (ss : List Statement) : Program :=
   { decls := [.proc (guardProc "P" ss) .empty] }
 
-private def trueLit : Expression.Expr := .const () (.boolConst true)
-private def intLit (i : Int) : Expression.Expr := .const () (.intConst i)
+private def trueLit : Expression.Expr := .const genLoc (.boolConst true)
+private def intLit (i : Int) : Expression.Expr := .const genLoc (.intConst i)
 
 /-- A trivial `assert` leaf. -/
 private def guardAssert (l : String) : Statement := Statement.assert l trueLit .empty
@@ -1951,13 +1953,13 @@ private def intBinOpTy : LMonoTy := .tcons "arrow" [.int, .tcons "arrow" [.int, 
 /-- `Int.Add(3, 4)` with the operator annotated, so `LExpr.typeOf` gives `int` and
     CSE records a monomorphic annotation for the extracted variable. -/
 private def cseDup : Expression.Expr :=
-  .app () (.app () (.op () ⟨"Int.Add", ()⟩ (some intBinOpTy)) (intLit 3)) (intLit 4)
+  .app genLoc (.app genLoc (.op genLoc ⟨"Int.Add", ()⟩ (some intBinOpTy)) (intLit 3)) (intLit 4)
 
 /-- The same subexpression with the operator **unannotated**. CSE extracts only a
     subexpression that `LExpr.typeCheck` types from its annotations, so it leaves
     this one in place. -/
 private def cseDupBare : Expression.Expr :=
-  .app () (.app () (.op () ⟨"Int.Add", ()⟩ none) (intLit 3)) (intLit 4)
+  .app genLoc (.app genLoc (.op genLoc ⟨"Int.Add", ()⟩ none) (intLit 3)) (intLit 4)
 
 /-- A body whose two `init`s share the subexpression `Int.Add(3, 4)`, so CSE
     fires and mints `$__cse.0`. -/
@@ -1986,8 +1988,8 @@ private def cseCollisionBody : List Statement :=
 /-- `Int.Add(G, 4)`: the same shape as `cseDup`, except that it mentions a variable
     the body **declares**, rather than being closed. -/
 private def cseDupLocal : Expression.Expr :=
-  .app () (.app () (.op () ⟨"Int.Add", ()⟩ (some intBinOpTy))
-    (.fvar () ⟨"G", ()⟩ (some .int))) (intLit 4)
+  .app genLoc (.app genLoc (.op genLoc ⟨"Int.Add", ()⟩ (some intBinOpTy))
+    (.fvar genLoc ⟨"G", ()⟩ (some .int))) (intLit 4)
 
 /-- A body whose duplicated subexpression mentions the local `G`. CSE hoists the
     extracted `var $__cse.0 := int.add(G, 4)` to the front of the body, *above*
@@ -2028,7 +2030,7 @@ private def cseBareBody : List Statement :=
 /-- `Int.Add(7, 8)`, a second annotated subexpression to duplicate, so CSE mints
     two names and the order claim has something to order. -/
 private def cseDup2 : Expression.Expr :=
-  .app () (.app () (.op () ⟨"Int.Add", ()⟩ (some intBinOpTy)) (intLit 7)) (intLit 8)
+  .app genLoc (.app genLoc (.op genLoc ⟨"Int.Add", ()⟩ (some intBinOpTy)) (intLit 7)) (intLit 8)
 
 /-- A body with two distinct duplicated subexpressions, so CSE mints `$__cse.0`
     and `$__cse.1`. With one minted name the order claim is trivially true, so this
@@ -2075,8 +2077,8 @@ private def twoCallSitesProgram : Program :=
           [ Statement.init ⟨"v", ()⟩ (.forAll [] .int) (.det (intLit 1)) .empty,
             guardAssert "inner" ]) .empty,
         .proc (guardProc "Caller"
-          [ .cmd (.call "Callee" [] .empty),
-            .cmd (.call "Callee" [] .empty) ]) .empty ] }
+          [ .cmd (.call "Callee" (some []) [] .empty),
+            .cmd (.call "Callee" (some []) [] .empty) ]) .empty ] }
 
 /-- The same two call sites, but with a callee that declares no variable, so
     `var_map` is empty and only labels are renamed. -/
@@ -2084,8 +2086,8 @@ private def twoCallSitesNoVarProgram : Program :=
   { decls :=
       [ .proc (guardProc "Callee" [guardAssert "inner"]) .empty,
         .proc (guardProc "Caller"
-          [ .cmd (.call "Callee" [] .empty),
-            .cmd (.call "Callee" [] .empty) ]) .empty ] }
+          [ .cmd (.call "Callee" (some []) [] .empty),
+            .cmd (.call "Callee" (some []) [] .empty) ]) .empty ] }
 
 -- Both inputs have distinct labels, so the property's guard does not fire and each
 -- failure below is about the pass.
@@ -2115,7 +2117,9 @@ private def twoCallSitesNoVarProgram : Program :=
 
 /-- `x >= 0`, as an obligation on the caller of `Callee`. -/
 private def geZeroX : Expression.Expr :=
-  .app () (.app () (.op () ⟨"Int.Ge", ()⟩ none) (.fvar () ⟨"x", ()⟩ (some .int))) (intLit 0)
+  .app genLoc
+    (.app genLoc (.op genLoc ⟨"Int.Ge", ()⟩ none) (.fvar genLoc ⟨"x", ()⟩ (some .int)))
+    (intLit 0)
 
 /-- A caller that binds `y := arg` and calls `Callee(y)`. Shared by the two witnesses
     below, which differ only in the callee's body. -/
@@ -2125,7 +2129,7 @@ private def callerPassing (arg : Expression.Expr) : Decl :=
           spec := { preconditions := [], postconditions := [] }
           body := .structured
             [ Statement.init ⟨"y", ()⟩ (.forAll [] .int) (.det arg) .empty,
-              .cmd (.call "Callee" [.inArg (.fvar () ⟨"y", ()⟩ (some .int))] .empty) ]
+              .cmd (.call "Callee" (some []) [.inArg (.fvar genLoc ⟨"y", ()⟩ (some .int))] .empty) ]
         } .empty
 
 /-- **The minimal witness for the dropped-`requires` defect.** A callee with
@@ -2228,9 +2232,9 @@ private def preconditionSatisfiedProgram : Program :=
       gave. -/
 private def generatedRequiresWitness : Program :=
   let preExpr : Expression.Expr :=
-    .app ()
-      (.abs () "__q0" (some (.bitvec 64)) (.const () (.boolConst true)))
-      (.const () (.bitvecConst 64 5065526758814335903))
+    .app genLoc
+      (.abs genLoc "__q0" (some (.bitvec 64)) (.const genLoc (.boolConst true)))
+      (.const genLoc (.bitvecConst 64 5065526758814335903))
   { decls :=
       [ .proc { header := { name := ⟨"Mj", ()⟩, typeArgs := ["P", "jvB"],
                             inputs := [(⟨"xB", ()⟩, .string), (⟨"sRw", ()⟩, .real),
@@ -2255,7 +2259,7 @@ private def generatedRequiresWitness : Program :=
                     Statement.init ⟨"w", ()⟩ (.forAll [] .real) .nondet .empty,
                     Statement.init ⟨"xxxxxx", ()⟩ (.forAll [] .int) .nondet .empty,
                     Statement.init ⟨"xxxxxxx", ()⟩ (.forAll [] .real) .nondet .empty,
-                    .cmd (.call "Mj"
+                    .cmd (.call "Mj" (some [])
                       [ .inoutArg ⟨"xB", ()⟩, .inoutArg ⟨"sRw", ()⟩, .inoutArg ⟨"w", ()⟩,
                         .outArg ⟨"xxxxxx", ()⟩, .outArg ⟨"xxxxxxx", ()⟩ ] .empty) ]
               } .empty ] }
@@ -2308,7 +2312,7 @@ private def generatedRequiresWitness : Program :=
 /-- `old T`, the pre-state value of an inout parameter `T`. Inside a procedure body
     this is a free variable whose name is literally `"old T"`, which the checker
     admits because the enclosing procedure declares `T` as an inout parameter. -/
-private def oldT : Expression.Expr := .fvar () ⟨"old T", ()⟩ (some .bool)
+private def oldT : Expression.Expr := .fvar genLoc ⟨"old T", ()⟩ (some .bool)
 
 /-- A callee with one inout parameter `T` whose body asserts `old T`, called once
     by a caller that declares `T`, so inlining must rename both `T` and `old T`. -/
@@ -2324,7 +2328,7 @@ private def oldExprProgram : Program :=
                 spec := { preconditions := [], postconditions := [] }
                 body := .structured
                   [ Statement.init ⟨"T", ()⟩ (.forAll [] .bool) (.det trueLit) .empty,
-                    .cmd (.call "Callee" [.inoutArg ⟨"T", ()⟩] .empty) ] } .empty ] }
+                    .cmd (.call "Callee" (some []) [.inoutArg ⟨"T", ()⟩] .empty) ] } .empty ] }
 
 -- Inlining binds `old T` to a fresh `$__inline1$old_T`, so input and output both typecheck.
 #guard progTypeChecks oldExprProgram
@@ -2336,12 +2340,12 @@ private def oldExprProgram : Program :=
 private def inlinableProgram : Program :=
   let f : Function :=
     { name := ⟨"guardF", ()⟩, typeArgs := [], inputs := [(⟨"x", ()⟩, .int)],
-      output := .int, body := some (.fvar () ⟨"x", ()⟩ (some .int)) }
+      output := .int, body := some (.fvar genLoc ⟨"x", ()⟩ (some .int)) }
   { decls :=
       [ .func f .empty,
         .proc (guardProc "P"
           [ Statement.init ⟨"y", ()⟩ (.forAll [] .int)
-              (.det (.app () (.op () ⟨"guardF", ()⟩
+              (.det (.app genLoc (.op genLoc ⟨"guardF", ()⟩
                 (some (.tcons "arrow" [.int, .int]))) (intLit 7))) .empty ]) .empty ] }
 
 -- The factory seeded from the program does hold the body, so the pass really
@@ -2362,17 +2366,17 @@ private def inlinableProgram : Program :=
 private def nestedInlinableProgram : Program :=
   let inner : Function :=
     { name := ⟨"guardInner", ()⟩, typeArgs := [], inputs := [(⟨"x", ()⟩, .int)],
-      output := .int, body := some (.fvar () ⟨"x", ()⟩ (some .int)) }
+      output := .int, body := some (.fvar genLoc ⟨"x", ()⟩ (some .int)) }
   let outer : Function :=
     { name := ⟨"guardOuter", ()⟩, typeArgs := [], inputs := [(⟨"y", ()⟩, .int)],
       output := .int,
-      body := some (.app () (.op () ⟨"guardInner", ()⟩
-        (some (.tcons "arrow" [.int, .int]))) (.fvar () ⟨"y", ()⟩ (some .int))) }
+      body := some (.app genLoc (.op genLoc ⟨"guardInner", ()⟩
+        (some (.tcons "arrow" [.int, .int]))) (.fvar genLoc ⟨"y", ()⟩ (some .int))) }
   { decls :=
       [ .func inner .empty, .func outer .empty,
         .proc (guardProc "P"
           [ Statement.init ⟨"z", ()⟩ (.forAll [] .int)
-              (.det (.app () (.op () ⟨"guardOuter", ()⟩
+              (.det (.app genLoc (.op genLoc ⟨"guardOuter", ()⟩
                 (some (.tcons "arrow" [.int, .int]))) (intLit 7))) .empty ]) .empty ] }
 
 -- The chain really inlines through both levels: the fully inlined result is the
@@ -2425,28 +2429,28 @@ private def nestedInlinableProgram : Program :=
 private def nullaryFuncProgram (body : Expression.Expr) : Program :=
   { decls :=
       [ .func { name := ⟨"NF", ()⟩, typeArgs := [], inputs := [], output := .bool,
-                body := some (.const () (.boolConst false)) } .empty,
+                body := some (.const genLoc (.boolConst false)) } .empty,
         .proc (guardProc "P" [Statement.assert "a" body .empty]) .empty ] }
 
 /-- The call `NF`, at `bool`. -/
-private def nfCall : Expression.Expr := .op () ⟨"NF", ()⟩ (some .bool)
+private def nfCall : Expression.Expr := .op genLoc ⟨"NF", ()⟩ (some .bool)
 
 -- **The binder boundary, pinned in both directions.** Outside a binder the evaluator
 -- and the transform agree, so the property is a live claim there.
 #guard !exprHasBinder nfCall
 #guard checkInlineEvalAgreement (nullaryFuncProgram nfCall)
 #guard checkInlineEvalAgreement
-  (nullaryFuncProgram (.ite () nfCall trueLit (.const () (.boolConst false))))
+  (nullaryFuncProgram (.ite genLoc nfCall trueLit (.const genLoc (.boolConst false))))
 
 -- Under a binder they legitimately diverge: `eval` substitutes and stops
 -- (`LExprEval.lean`) while `inlineFuncDefs` recurses, so `fun q => NF` evaluates
 -- to itself on the left and to `fun q => false` on the right. `exprHasBinder`
 -- excludes such an expression, and the property therefore holds on such a program. This guard records
 -- that the exclusion does real work.
-#guard exprHasBinder (.abs () "q" (some .bool) nfCall)
-#guard checkInlineEvalAgreement (nullaryFuncProgram (.abs () "q" (some .bool) nfCall))
-#guard (let p := nullaryFuncProgram (.abs () "q" (some .bool) nfCall)
-        let e : Expression.Expr := .abs () "q" (some .bool) nfCall
+#guard exprHasBinder (.abs genLoc "q" (some .bool) nfCall)
+#guard checkInlineEvalAgreement (nullaryFuncProgram (.abs genLoc "q" (some .bool) nfCall))
+#guard (let p := nullaryFuncProgram (.abs genLoc "q" (some .bool) nfCall)
+        let e : Expression.Expr := .abs genLoc "q" (some .bool) nfCall
         let out := Strata.inlineFuncDefs (programFactory p) (e := e)
         -- Without the exclusion this pair would be reported as a disagreement.
         decide (out = e) == false &&
@@ -2475,6 +2479,10 @@ private def twoInvariantLoop : Statement :=
 #guard checkLoopVcAssertCount (guardProg [twoInvariantLoop])
 #guard checkLoopBareAfterPass (guardProg [twoInvariantLoop])
 #guard checkLoopVcIdempotent (guardProg [twoInvariantLoop])
+-- The phase rejects its own output: the prefix `$__insertLoopInvAssume_` is reserved for its
+-- markers.
+#guard ((runPhase loopInvPhase (guardProg [twoInvariantLoop])).bind
+  fun (_, out) => runPhase loopInvPhase out).isNone
 #guard checkLoopVcStatFaithful (guardProg [twoInvariantLoop])
 #guard checkLoopVcSurvivesElim (guardProg [twoInvariantLoop])
 #guard checkLoopElimStatFaithful (guardProg [twoInvariantLoop])
@@ -2495,12 +2503,12 @@ private def twoInvariantLoop : Statement :=
 private def axiomRelevanceProgram : Program :=
   let f : Function :=
     { name := ⟨"relF", ()⟩, typeArgs := [], inputs := [(⟨"x", ()⟩, .int)],
-      output := .int, body := some (.fvar () ⟨"x", ()⟩ (some .int)) }
+      output := .int, body := some (.fvar genLoc ⟨"x", ()⟩ (some .int)) }
   { decls :=
       [ .func f .empty,
         -- Mentions `relF`, so it is relevant to the seed set `["relF"]`.
         .ax { name := "relevantAx",
-              e := .eq () (.app () (.op () ⟨"relF", ()⟩
+              e := .eq genLoc (.app genLoc (.op genLoc ⟨"relF", ()⟩
                 (some (.tcons "arrow" [.int, .int]))) (intLit 1)) (intLit 1) } .empty,
         -- Mentions no declared function, so it is irrelevant.
         .ax { name := "irrelevantAx", e := trueLit } .empty ] }
@@ -2665,7 +2673,7 @@ private def ensuresFalseProg (ss : List Statement) : Program :=
       { header := { name := ⟨"P", ()⟩, typeArgs := [], inputs := [],
                     outputs := [(⟨"r", ()⟩, .int)], lemmas := [] }
         spec := { preconditions := [],
-                  postconditions := [("post", { expr := .const () (.boolConst false) })] }
+                  postconditions := [("post", { expr := .const genLoc (.boolConst false) })] }
         body := .structured ss } .empty] }
 
 /-- An empty nondeterministic `if *`, which contributes nothing but the name. -/

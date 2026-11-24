@@ -102,7 +102,7 @@ theorem genPrecondition_tuned_support_eq (θ : Tuning) (octx : OpCtx)
 /-- Any soundness-and-completeness fact transfers without knowing what the predicate is. -/
 example (θ : Tuning) (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy)
     (tvars : List TyIdentifier) (depth : Nat) (pctx : PolyOpCtx) (ambient : FVarCtx)
-    (P : FuncPrecondition LExpr' Unit → Prop)
+    (P : FuncPrecondition LExpr' ExprSourceLoc → Prop)
     (h : IsSoundAndComplete
       (genPrecondition (G := SPMF) octx inputs tvars depth pctx ambient) P) :
     IsSoundAndComplete

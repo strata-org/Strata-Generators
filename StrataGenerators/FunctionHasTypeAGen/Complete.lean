@@ -85,7 +85,7 @@ theorem genMeasure_complete (dts : List (String × Nat)) (fctx : FVarCtx) (octx 
     (ho : ∀ m, o = some m →
       (measureOnFormal inputs m = true ∧
         m ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .int)) ∨
-      ∃ p ∈ datatypeFormals dts inputs, m = .fvar () p.1 (some p.2)) :
+      ∃ p ∈ datatypeFormals dts inputs, m = .fvar genLoc p.1 (some p.2)) :
     o ∈ SPMF.support (genMeasure (G := SPMF) dts fctx octx tvars depth pctx inputs) := by
   have hint : (∀ m, o = some m → measureOnFormal inputs m = true ∧
       m ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .int)) →
@@ -108,7 +108,7 @@ theorem genMeasure_complete (dts : List (String × Nat)) (fctx : FVarCtx) (octx 
       rcases ho m rfl with hl | ⟨p, hp, rfl⟩
       · exact ⟨3, fun () => genIntMeasure fctx octx tvars depth pctx inputs, by simp, by omega,
           hint (fun m' hm' => Option.some.inj hm' ▸ hl)⟩
-      · refine ⟨1, fun () => (fun p => some (.fvar () p.1 (some p.2))) <$>
+      · refine ⟨1, fun () => (fun p => some (.fvar genLoc p.1 (some p.2))) <$>
           elements (datatypeFormals dts inputs) hne, by simp, by omega, ?_⟩
         rw [mem_support_map_iff]
         exact ⟨p, (mem_support_elements_iff hne).mpr hp, rfl⟩
@@ -136,6 +136,7 @@ theorem genFuncParts_complete (genRecursive : SPMF Bool) (fctx : FVarCtx) (octx 
     (hPreReach : ∀ p ∈ func.preconditions, p.expr ∈ SPMF.support
       (genLExpr (G := SPMF) (funcFctx fctx func.inputs func.typeArgs)
         (opsOver func.typeArgs octx) pctx func.typeArgs [] depth .bool))
+    (hPreMd : ∀ p ∈ func.preconditions, p.md = genLoc)
     (hAxiomsLen : func.axioms.length ≤ maxFuncClauses)
     (hAxiomsReach : ∀ ax ∈ func.axioms, ax ∈ SPMF.support
       (genLExpr (G := SPMF) (funcFctx fctx func.inputs func.typeArgs)
@@ -143,7 +144,7 @@ theorem genFuncParts_complete (genRecursive : SPMF Bool) (fctx : FVarCtx) (octx 
     (hMeasureReach : ∀ m, func.measure = some m → m ∈ SPMF.support
       (genLExpr (G := SPMF) (funcFctx fctx func.inputs func.typeArgs)
         (opsOver func.typeArgs octx) pctx func.typeArgs [] depth .int) ∨
-      ∃ p ∈ datatypeFormals dts func.inputs, m = .fvar () p.1 (some p.2))
+      ∃ p ∈ datatypeFormals dts func.inputs, m = .fvar genLoc p.1 (some p.2))
     (hAttrLen : func.attr.size ≤ depth)
     (hAttrIdx : ∀ a ∈ func.attr.toList, ∀ i ∈ attrParamIdx a, i ≤ depth)
     (hLemmasLen : func.lemmas.length ≤ depth)
@@ -174,7 +175,7 @@ theorem genFuncParts_complete (genRecursive : SPMF Bool) (fctx : FVarCtx) (octx 
       exact genOptExpr_complete _ _ func.typeArgs depth func.output func.body hBodyReach
     · rw [ite_eq_left rfl, hwt.constrNoBody hc, mem_support_pure_iff]
   · exact genPreconditions_complete _ func.inputs func.typeArgs depth _
-      func.preconditions hPreLen hPreReach
+      func.preconditions hPreLen hPreReach hPreMd
   · rw [mem_support_listOfMaxLength_iff]
     exact ⟨hAxiomsLen, hAxiomsReach⟩
   · cases hr : func.isRecursive
@@ -216,6 +217,7 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat) (pctx
     (hPreReach : ∀ p ∈ func.preconditions, p.expr ∈ SPMF.support
       (genLExpr (G := SPMF) (funcFctx fctx func.inputs func.typeArgs)
         (opsOver func.typeArgs octx) pctx func.typeArgs [] depth .bool))
+    (hPreMd : ∀ p ∈ func.preconditions, p.md = genLoc)
     (hAxiomsLen : func.axioms.length ≤ maxFuncClauses)
     (hAxiomsReach : ∀ ax ∈ func.axioms, ax ∈ SPMF.support
       (genLExpr (G := SPMF) (funcFctx fctx func.inputs func.typeArgs)
@@ -223,7 +225,7 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat) (pctx
     (hMeasureReach : ∀ m, func.measure = some m → m ∈ SPMF.support
       (genLExpr (G := SPMF) (funcFctx fctx func.inputs func.typeArgs)
         (opsOver func.typeArgs octx) pctx func.typeArgs [] depth .int) ∨
-      ∃ p ∈ datatypeFormals dts func.inputs, m = .fvar () p.1 (some p.2))
+      ∃ p ∈ datatypeFormals dts func.inputs, m = .fvar genLoc p.1 (some p.2))
     (hAttrLen : func.attr.size ≤ depth)
     (hAttrIdx : ∀ a ∈ func.attr.toList, ∀ i ∈ attrParamIdx a, i ≤ depth)
     (hLemmasLen : func.lemmas.length ≤ depth)
@@ -237,7 +239,7 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat) (pctx
       hTyArgsLen hTyArgsReach hInputNamesLen hInputNamesReach hInputTyReach hOutputReach
       hAvoidInputs,
     genFuncParts_complete genRareFlag fctx octx depth pctx dts C ts func hwt
-      (mem_support_genRareFlag _) hBodyReach hPreLen hPreReach hAxiomsLen hAxiomsReach
+      (mem_support_genRareFlag _) hBodyReach hPreLen hPreReach hPreMd hAxiomsLen hAxiomsReach
       hMeasureReach hAttrLen hAttrIdx hLemmasLen hLemmasReach⟩
 
 end StrataGenerators.Function

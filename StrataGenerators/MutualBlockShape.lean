@@ -122,7 +122,7 @@ private def baseCtx : LContext CoreLParams := DatatypeGen.coreContext
 /-- Adds `block` to the context `C` with `LContext.addMutualBlock`. -/
 private def addBlock (C : LContext CoreLParams) (block : MutualDatatype Unit) :
     Except Strata.Message (LContext CoreLParams) :=
-  @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+  @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit _
     _ C block
 
 /-- Whether Strata accepts each datatype of the block **on its own**, as a block of one

@@ -179,7 +179,7 @@ def exprPrintsCleanly (e : Expression.Expr) : Bool :=
 
 /-- A bitvector literal at the width `w`, as a constant with an annotation. -/
 def bvLit (w : Nat) : Expression.Expr :=
-  .const () (.bitvecConst w (BitVec.ofNat w 1))
+  .const genLoc (.bitvecConst w (BitVec.ofNat w 1))
 
 /-- Whether a `bitvec w` literal prints with no conversion error. This is the check for one width
     under `checkBv128LiteralPrints`. It has a name, so that a report can score each registered
@@ -207,7 +207,7 @@ def allBvIntConversionOps : List String :=
     literal. `handleUnaryOps` chooses its branch from the *name of the operator* alone, so the
     type of the argument does not change whether the printer can write the operator. -/
 def unaryApp (name : String) : Expression.Expr :=
-  .app () (.op () ⟨name, ()⟩ none) (.const () (.intConst 1))
+  .app genLoc (.op genLoc ⟨name, ()⟩ none) (.const genLoc (.intConst 1))
 
 /-- Whether an application of the named operator prints with no conversion error. This is the
     check for one operator under `checkBvIntConversionsPrint`. It has a name, so that a report can
@@ -289,7 +289,7 @@ def printableBvWidths : List Nat := [1, 8, 16, 32, 64]
     *type* position, because the width is the type of the input and the type of the output. -/
 def bvIdentityFunc (w : Nat) : Function :=
   { name := ⟨"f", ()⟩, typeArgs := [], inputs := [("x", .bitvec w)],
-    output := .bitvec w, body := some (.fvar () ⟨"x", ()⟩ (some (.bitvec w))) }
+    output := .bitvec w, body := some (.fvar genLoc ⟨"x", ()⟩ (some (.bitvec w))) }
 
 /-- Whether `Function.typeCheck` accepts the identity function at `bitvec w`. The result is `true`
     for each `w` from 0 to 199. -/

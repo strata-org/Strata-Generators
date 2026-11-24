@@ -485,7 +485,9 @@ theorem genCallTail_support
       r = ⟨StrataGenerators.Stmt.initChain
               ((StrataGenerators.Stmt.substSig σ s.M).filter (needsInit ctx)
                 ++ T.filter (needsInit ctx))
-            ++ [Statement.call s.pname (StrataGenerators.Stmt.mkArgs s.M T exprs mask) default],
+            ++ [Statement.call s.pname
+                  (callTyArgs s.typeArgs σ)
+                  (StrataGenerators.Stmt.mkArgs s.M T exprs mask) default],
           C, StrataGenerators.Stmt.insertAllCtx ctx
             ((StrataGenerators.Stmt.substSig σ s.M).filter (needsInit ctx)
               ++ T.filter (needsInit ctx))⟩ := by
@@ -521,7 +523,9 @@ theorem genCallTail_mem
     (hgen : exprs.all (binderAnnotsKnownIn C.knownTypes) = true) :
     (⟨StrataGenerators.Stmt.initChain
         ((StrataGenerators.Stmt.substSig σ s.M).filter (needsInit ctx) ++ T.filter (needsInit ctx))
-        ++ [Statement.call s.pname (StrataGenerators.Stmt.mkArgs s.M T exprs mask) default],
+        ++ [Statement.call s.pname
+              (callTyArgs s.typeArgs σ)
+              (StrataGenerators.Stmt.mkArgs s.M T exprs mask) default],
       C, StrataGenerators.Stmt.insertAllCtx ctx
         ((StrataGenerators.Stmt.substSig σ s.M).filter (needsInit ctx)
           ++ T.filter (needsInit ctx))⟩ : GenStmtResult) ∈
@@ -709,7 +713,7 @@ theorem genCallTail_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     · exact List.all_eq_true.mp hMusable q h
     · exact List.all_eq_true.mp hTusable q h
   -- Callee signature facts from the correspondence.
-  obtain ⟨proc, hfind, _, hInputs, hOutputs, hIdisjOut, hOutNodup⟩ := hProcs s hs
+  obtain ⟨proc, hfind, hTyArgs, hInputs, hOutputs, hIdisjOut, hOutNodup⟩ := hProcs s hs
   have hMnotO : ∀ k ∈ s.M.keys, k ∉ s.O.keys := by
     rw [lm_keys_append] at hOutNodup
     exact fun k hk hkO => (List.nodup_append.mp hOutNodup).2.2 k hk k hkO rfl
@@ -783,6 +787,7 @@ theorem genCallTail_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
   -- instantiated ones the generator used. Rewrite them back to `substSig σ …`.
   rw [← hMσ] at hNodup hReuse ⊢
   rw [← hOσ] at hTVals
+  rw [← hTyArgs]
   exact call_mixed_body_sound σ s.M s.I s.O T exprs mask hfind hInputs hOutputs
     hExLen hTVals hExTy hIdisjOut hMnotO hNodup hReuse hwk
 
@@ -864,6 +869,7 @@ theorem genCallStmt_mem_complete (procs : ProcSigCtx)
           ++ (outTargets immutableVars ctx
                 (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O) (functionNames C)).filter (needsInit ctx))
         ++ [Statement.call s.pname
+              (callTyArgs s.typeArgs (s.typeArgs.zip σvals))
               (StrataGenerators.Stmt.mkArgs s.M
                 (outTargets immutableVars ctx
                   (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O) (functionNames C)) exprs mask) default],

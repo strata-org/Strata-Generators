@@ -3,7 +3,7 @@ import StrataGenerators.HasTypeAGen.AnnotFacts
 import StrataGenerators.FunctionHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen.Dedup
 import StrataGenerators.FunctionHasTypeAGen.IdentName
-import Strata.Languages.Core.FunctionTypeSpec
+import Strata.Languages.Core.Typing.Spec.FunctionTypeSpec
 import Strata.Util.ListMapProps
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec ArbString
@@ -254,7 +254,7 @@ theorem genPreconditions_sound {C : LContext CoreLParams} {ts : TypeScopes} {oct
     {pctx : PolyOpCtx} {ambient : FVarCtx}
     (hctx : ExprCtxOk C ts (inputsAsFVarCtx inputs ++ ambient) octx pctx)
     (hsc : ExprScopedCtx tvars (inputsAsFVarCtx inputs ++ ambient) octx pctx)
-    {ps : List (Strata.DL.Util.FuncPrecondition LExpr' Unit)}
+    {ps : List (Strata.DL.Util.FuncPrecondition LExpr' ExprSourceLoc)}
     (hps : ps ∈ SPMF.support
       (genPreconditions (G := SPMF) octx inputs tvars depth pctx ambient)) :
     ∀ p ∈ ps, ExprWellTyped C ts p.expr .bool ∧ ∀ v ∈ annotTyVars p.expr, v ∈ tvars := by
@@ -375,7 +375,7 @@ theorem genMeasure_mem {dts : List (String × Nat)} {fctx : FVarCtx} {octx : OpC
       (genMeasure (G := SPMF) dts fctx octx tvars depth pctx inputs)) :
     (measureOnFormal inputs m = true ∧
       m ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .int)) ∨
-      ∃ p ∈ datatypeFormals dts inputs, m = .fvar () p.1 (some p.2) := by
+      ∃ p ∈ datatypeFormals dts inputs, m = .fvar genLoc p.1 (some p.2) := by
   unfold genMeasure at h
   split at h
   · rw [mem_support_frequency_iff] at h
@@ -633,7 +633,7 @@ theorem genFuncParts_sound (genRecursive : SPMF Bool) (fctx : FVarCtx) (octx : O
   have hmeasMem : ∀ m, func.measure = some m →
       (measureOnFormal func.inputs m = true ∧ m ∈ SPMF.support (genLExpr (G := SPMF)
         (funcFctx fctx func.inputs func.typeArgs) (opsOver func.typeArgs octx) pctx func.typeArgs []
-        depth .int)) ∨ ∃ p ∈ datatypeFormals dts func.inputs, m = .fvar () p.1 (some p.2) := by
+        depth .int)) ∨ ∃ p ∈ datatypeFormals dts func.inputs, m = .fvar genLoc p.1 (some p.2) := by
     intro m hm
     rw [hMeas] at hm
     rw [hm] at hmeasure
@@ -675,7 +675,7 @@ theorem genFuncParts_sound (genRecursive : SPMF Bool) (fctx : FVarCtx) (octx : O
     · obtain ⟨hpIn, n, args, hty, kc, hkc, hkcn⟩ := mem_datatypeFormals hp
       have hget : (C.datatypes.getType n).isSome := hkcn ▸ hdts kc hkc
       have htyped :
-          ExprWellTyped C (funcScopes ts func) (.fvar () p.1 (some p.2)) (.tcons n args) := by
+          ExprWellTyped C (funcScopes ts func) (.fvar genLoc p.1 (some p.2)) (.tcons n args) := by
         rw [← hty]
         exact ⟨LExpr.HasTypeA.fvar, (closureHyps_annotsOk func.typeArgs hctxE).fvar _ (hfx p hpIn)⟩
       dsimp only
@@ -828,27 +828,35 @@ theorem genOptExpr_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIden
 
 /-- Completeness of `genPreconditions`: the generator reaches every list of at most
     `maxFuncClauses` clauses whose expressions `genLExpr` reaches at `.bool` over the formals and
-    `ambient`. -/
+    `ambient`, and whose metadata is the location `genLoc` of generated nodes. -/
 theorem genPreconditions_complete (octx : OpCtx)
     (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier)
-    (depth : Nat) (ambient : FVarCtx) (ps : List (Strata.DL.Util.FuncPrecondition LExpr' Unit))
+    (depth : Nat) (ambient : FVarCtx)
+    (ps : List (Strata.DL.Util.FuncPrecondition LExpr' ExprSourceLoc))
     {pctx : PolyOpCtx} (hlen : ps.length ≤ maxFuncClauses)
     (hreach : ∀ p ∈ ps, p.expr ∈ SPMF.support (genLExpr (G := SPMF)
-      (inputsAsFVarCtx inputs ++ ambient) octx pctx tvars [] depth .bool)) :
+      (inputsAsFVarCtx inputs ++ ambient) octx pctx tvars [] depth .bool))
+    (hmd : ∀ p ∈ ps, p.md = genLoc) :
     ps ∈ SPMF.support
       (genPreconditions (G := SPMF) octx inputs tvars depth pctx ambient) := by
   rw [genPreconditions, mem_support_listOfMaxLength_iff]
   refine ⟨hlen, fun p hp => ?_⟩
+  have hpeq : ({ expr := p.expr, md := genLoc } :
+      Strata.DL.Util.FuncPrecondition LExpr' ExprSourceLoc) = p := by
+    have hmdp := hmd p hp
+    cases p
+    simp only at hmdp ⊢
+    rw [hmdp]
   rw [SPMF.mem_support_iff_may, genPrecondition]; walk
   split
-  · exact .inr ⟨_, hreach p hp, rfl⟩
-  · exact ⟨_, hreach p hp, rfl⟩
+  · exact .inr ⟨_, hreach p hp, hpeq⟩
+  · exact ⟨_, hreach p hp, hpeq⟩
 
 /-- The **exact** support of `genPrecondition`: a clause whose expression is a plain `.bool` draw
     over the formals and `ambient`, or `x == e'` for a formal `x : τ` and a draw `e'` at `τ`. -/
 theorem mem_support_genPrecondition_iff (octx : OpCtx)
     (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier)
-    (depth : Nat) (ambient : FVarCtx) (p : Strata.DL.Util.FuncPrecondition LExpr' Unit) :
+    (depth : Nat) (ambient : FVarCtx) (p : Strata.DL.Util.FuncPrecondition LExpr' ExprSourceLoc) :
     p ∈ SPMF.support (genPrecondition (G := SPMF) octx inputs tvars depth [] ambient)
       ↔ ∃ e,
           (e ∈ SPMF.support (genLExpr (G := SPMF)
@@ -857,8 +865,8 @@ theorem mem_support_genPrecondition_iff (octx : OpCtx)
              (x, τ) ∈ inputs.toList ∧
              e' ∈ SPMF.support (genLExpr (G := SPMF)
                (inputsAsFVarCtx inputs ++ ambient) octx [] tvars [] depth τ) ∧
-             e = .eq () (.fvar () x (some τ)) e'))
-          ∧ p = { expr := e, md := () } := by
+             e = .eq genLoc (.fvar genLoc x (some τ)) e'))
+          ∧ p = { expr := e, md := genLoc } := by
   constructor
   · revert p; show IsSoundFor _ _
     rw [IsSoundFor.iff_obs, genPrecondition]; unfold genInputMentioningPrecond

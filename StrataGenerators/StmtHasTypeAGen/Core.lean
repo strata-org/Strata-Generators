@@ -4,7 +4,7 @@ import Basalt.Combinators
 import StrataGenerators.BasaltCompat.Defs
 import Basalt.Tuning.Attr
 import BasaltExamples.ArbString.Def
-import Strata.Languages.Core.StatementTypeSpec
+import Strata.Languages.Core.Typing.Spec.StatementTypeSpec
 import StrataGenerators.CmdHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen.Core
 import StrataGenerators.StmtHasTypeAGen.CallDefs
@@ -349,6 +349,7 @@ def genCallTail [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
         let mask ← listOf (elements [true, false] (by simp))
         let theCall :=
           Statement.call s.pname
+            (callTyArgs s.typeArgs σ)
             (StrataGenerators.Stmt.mkArgs s.M outTargets exprs mask) default
         -- The `init`s (possibly none) then the call, inline in the ambient scope.
         pure ⟨StrataGenerators.Stmt.initChain toInit ++ [theCall], C,

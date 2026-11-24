@@ -277,7 +277,7 @@ def genInputMentioningPrecond [Gen G] (octx : OpCtx)
     G LExpr' := do
   let (x, τ) ← elements inputs.toList hne
   let e ← genLExpr (inputsAsFVarCtx inputs ++ ambient) octx pctx tvars [] depth τ
-  pure (.eq () (.fvar () x (some τ)) e)
+  pure (.eq genLoc (.fvar genLoc x (some τ)) e)
 
 /-- Makes a precondition of the type `bool`, which is a `requires` clause, over the formal
     parameters and the variables of `ambient`.
@@ -290,7 +290,7 @@ def genInputMentioningPrecond [Gen G] (octx : OpCtx)
     operator, such as `Int.SafeDiv`, when the caller gives one. -/
 def genPrecondition [Gen G] (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy)
     (tvars : List TyIdentifier) (depth : Nat) (pctx : PolyOpCtx := []) (ambient : FVarCtx := []) :
-    G (Strata.DL.Util.FuncPrecondition LExpr' Unit) := do
+    G (Strata.DL.Util.FuncPrecondition LExpr' ExprSourceLoc) := do
   let e ← (if hne : inputs.toList ≠ [] then
       frequency
         [ (3, fun () => genInputMentioningPrecond octx inputs tvars depth hne pctx ambient),
@@ -299,7 +299,7 @@ def genPrecondition [Gen G] (octx : OpCtx) (inputs : ListMap (Identifier Unit) L
         (by show 0 < 3 + 1; omega)
     else
       genLExpr (inputsAsFVarCtx inputs ++ ambient) octx pctx tvars [] depth .bool)
-  pure { expr := e, md := () }
+  pure { expr := e, md := genLoc }
 
 /-- The most preconditions, and the most axioms, that a generated function has. -/
 def maxFuncClauses : Nat := 2
@@ -308,7 +308,7 @@ def maxFuncClauses : Nat := 2
     `genPrecondition`. -/
 def genPreconditions [Gen G] (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy)
     (tvars : List TyIdentifier) (depth : Nat) (pctx : PolyOpCtx := []) (ambient : FVarCtx := []) :
-    G (List (Strata.DL.Util.FuncPrecondition LExpr' Unit)) :=
+    G (List (Strata.DL.Util.FuncPrecondition LExpr' ExprSourceLoc)) :=
   listOfMaxLength maxFuncClauses (genPrecondition octx inputs tvars depth pctx ambient)
 
 -- ── The generators for the flags, the measure and the attributes ───────
@@ -348,7 +348,7 @@ def genMeasure [Gen G] (dts : List (String × Nat)) (fctx : FVarCtx) (octx : OpC
   if h : datatypeFormals dts inputs ≠ [] then
     frequency
       [ (3, fun () => genIntMeasure fctx octx tvars depth pctx inputs),
-        (1, fun () => (fun p => some (.fvar () p.1 (some p.2))) <$>
+        (1, fun () => (fun p => some (.fvar genLoc p.1 (some p.2))) <$>
           elements (datatypeFormals dts inputs) h) ]
       (by simp)
   else

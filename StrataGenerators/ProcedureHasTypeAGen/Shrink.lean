@@ -240,7 +240,7 @@ private def emptyProc : Procedure :=
     spec := { preconditions := [], postconditions := [] }
     body := .structured [] }
 
-private def trueExpr : Expression.Expr := .const () (.boolConst true)
+private def trueExpr : Expression.Expr := .const genLoc (.boolConst true)
 
 /-- `emptyProc` with one trivial precondition and one trivial postcondition. -/
 private def specProc : Procedure :=
@@ -274,7 +274,7 @@ private def specProc : Procedure :=
 -- keeping pre/postconditions Boolean, not the candidate generator.
 #guard procTypeChecks
   { emptyProc with
-    spec := { preconditions := [("pre", { expr := .const () (.intConst 0) })],
+    spec := { preconditions := [("pre", { expr := .const genLoc (.intConst 0) })],
               postconditions := [] } } == false
 
 -- List level: dropping is offered, relabelling keeps names contiguous, and the

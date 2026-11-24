@@ -160,7 +160,7 @@ def InGenShape : Statement → Prop
   | .cmd (CmdExt.cmd (.assert _ _ md)) => md = default
   | .cmd (CmdExt.cmd (.assume _ _ md)) => md = default
   | .cmd (CmdExt.cmd (.cover _ _ md)) => md = default
-  | .cmd (CmdExt.call _ _ md) => md = default
+  | .cmd (CmdExt.call _ _ _ md) => md = default
   | .block _ body md => md = default ∧ InGenShapeList body
   | .ite _ t e md => md = default ∧ InGenShapeList t ∧ InGenShapeList e
   | .loop _ _ _ body md => md = default ∧ InGenShapeList body
@@ -205,7 +205,7 @@ def AlphabetOk (tvars : List TyIdentifier) (maxStmtSeqLen : Nat) : Nat → State
       l ∈ SPMF.support (genIdentName (G := SPMF))
   | _, .cmd (CmdExt.cmd (.cover l _ _)) =>
       l ∈ SPMF.support (genIdentName (G := SPMF))
-  | _, .cmd (CmdExt.call _ _ _) => True
+  | _, .cmd (CmdExt.call _ _ _ _) => True
   | 0, .block .. => False
   | (n+1), .block label body _ =>
       label ∈ SPMF.support (genIdentName (G := SPMF)) ∧
@@ -254,10 +254,12 @@ mutual
     the generator's recipe for *some* sampled type-instantiation `σvals` (with
     `σ := s.typeArgs.zip σvals`) and *some* argument-order mask `mask`:
     `mkArgs s.M (outTargets [] ctx (substSig σ s.O)) exprs mask` for some callee `s`
-    and for some by-value inputs. The predicate also asks for a usable instantiated in-out block and for
-    the reachability of each input by `genLExpr` at the *instantiated* input type of the callee.
-    `hσvals` places `σvals` in the sampling step's support. The generator's other guards follow from the
-    typing of the call: its written-to names are distinct (`WFcallProp.lhsWF`, `call_written_nodup`)
+    and for some by-value inputs, and its stored type arguments are the instantiation of the
+    callee's type parameters by `σ`. The predicate also asks for a usable instantiated in-out block
+    and for the reachability of each input by `genLExpr` at the *instantiated* input type of the
+    callee. `hσvals` places `σvals` in the sampling step's support. The generator's other guards
+    follow from the typing of the call: its written-to names are distinct (`WFcallProp.lhsWF`,
+    `call_written_nodup`)
     and all in scope (`call_no_init`), so the emitted group is the bare call and the output scope is
     `ctx`.
     `True` on every non-call leaf; nested bodies recurse with the body's own scope.
@@ -271,7 +273,7 @@ mutual
     targets, and `exists_mask_mkArgs_iff` shows it reaches no more than those. So
     this clause admits exactly the argument orders the `call` rule leaves free. -/
 def CallOk (imm : List (Identifier Unit)) (procs : ProcSigCtx) (ctx : VarCtx) (n : Nat) : Statement → Prop
-  | .cmd (CmdExt.call pname args _) =>
+  | .cmd (CmdExt.call pname tyArgs args _) =>
       ∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr)
         (mask : List Bool),
         s ∈ procs ∧
@@ -285,6 +287,7 @@ def CallOk (imm : List (Identifier Unit)) (procs : ProcSigCtx) (ctx : VarCtx) (n
         args = StrataGenerators.Stmt.mkArgs s.M
           (outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
           exprs mask ∧
+        tyArgs = callTyArgs s.typeArgs (s.typeArgs.zip σvals) ∧
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).all (usableName imm ctx) = true ∧
         List.Forall₂
           (fun e τ => e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] n τ))
@@ -368,7 +371,7 @@ mutual
 def ExprOk (ctx : VarCtx) (n : Nat) : Statement → Prop
   | .cmd (CmdExt.cmd c) => CmdExprOk (octx := octx) (tvars := tvars) (pctx := pctx) ctx n c
   -- A call's by-value inputs are `CallOk`'s business, not this predicate's.
-  | .cmd (CmdExt.call _ _ _) => True
+  | .cmd (CmdExt.call _ _ _ _) => True
   | .block _ body _ => ExprOkList ctx (n - 1) body
   | .ite cond t e _ =>
       (∀ g, cond = .det g →
@@ -416,11 +419,11 @@ theorem exprOk_assert_of_syntactic (ctx : VarCtx) (n : Nat) (l : String)
     `Gaps.hExprC_unsatisfiable` proves that a hypothesis over each environment has no such witness. -/
 theorem exprOk_assert_true (n : Nat) :
     ExprOk (octx := octx) (tvars := tvars) (pctx := pctx) []  n
-      (.cmd (CmdExt.cmd (.assert "l" (LExpr.const () (LConst.boolConst true)) default))) := by
+      (.cmd (CmdExt.cmd (.assert "l" (LExpr.const genLoc (LConst.boolConst true)) default))) := by
   simp only [ExprOk]
   exact exprOk_assert_of_syntactic [] n "l" _ default
     ((HasTypeA_iff_typeCheck (T := LExprParams') []
-      (LExpr.const () (LConst.boolConst true)) LMonoTy.bool).mpr rfl)
+      (LExpr.const genLoc (LConst.boolConst true)) LMonoTy.bool).mpr rfl)
     (by simp [emptyNames]) (by simp [allVarsInCtx]) AllTypesSimple.boolConst
     (by simp [termDepth])
 
@@ -693,11 +696,13 @@ theorem spec_complete_at (P : Program) (imm : List (Identifier Unit)) (procs : P
         genCmdStmt_complete_spec imm procs L C ctx n ts ts' c2 hΓ hcmd hnf hwr hok
           (by simpa [ExprOk] using hexpr)
       exact ⟨ctx', hctx', hstep, hmem⟩
-    | call pname callArgs proc md σ _ hfind hwf hlhs hin hout hequiv2 =>
+    | call pname tyArgs callArgs proc md σ _ hfind hwf hlhs hin hout _ hequiv2 =>
       -- Shape gives `md = default`; `CallOk` gives membership + recipe + guard + empty chain.
       have hmdc : md = default := hnf
       subst hmdc
-      obtain ⟨s, σvals, exprs, mask, hsmem, hpname, hσvals, hargs, hMusable, hForall⟩ := hcall
+      obtain ⟨s, σvals, exprs, mask, hsmem, hpname, hσvals, hargs, htyArgs, hMusable, hForall⟩ :=
+        hcall
+      subst htyArgs
       have hNodup := call_written_nodup hargs hwf.lhsWF
       have hEmpty := call_no_init hΓ hargs hlhs
       have hgen : exprs.all (binderAnnotsKnownIn C.knownTypes) = true := by

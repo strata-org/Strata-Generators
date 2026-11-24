@@ -114,7 +114,7 @@ partial def loopNesting : Statement → Nat
   | _ => 0
 
 def isCallStmt : Statement → Bool
-  | .call _ _ _ => true
+  | .call _ _ _ _ => true
   | _ => false
 
 /-- The statement family's sample. It uses the `size` and `len` schedule of

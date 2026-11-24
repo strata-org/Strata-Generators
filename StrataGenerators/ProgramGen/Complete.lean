@@ -483,7 +483,7 @@ The `distinct` step draws a fresh name, one monotype `τ` over the type
 constructors in scope, a count of constants, and that many fresh constant names.
 It declares each constant as a 0-ary function at `τ`, and then emits
 `distinct[nm] c₁ … cₙ`. Each element is the annotated operator
-`.op () ⟨c, ()⟩ (some τ)`, which `distinctElems` builds.
+`.op genLoc ⟨c, ()⟩ (some τ)`, which `distinctElems` builds.
 
 This step *does* contain expressions. But `distinctElems` builds each expression
 directly as an annotated `.op` node, and the step does not call `genLExpr`. Thus,
@@ -561,7 +561,7 @@ theorem genDeclDatatype_complete {s : GenState} {b : Bounds}
         b.maxExtraBaseConstrs b.maxRecConstrs b.maxArgs b.maxDatatypeSize s.reserved))
     (hnamesAllowed : ∀ d ∈ block, isAllowedName d.name = true)
     (hnamesNotLocal : ∀ d ∈ block, isLocalTypeName d.name = false)
-    (hC : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+    (hC : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit _
       _ s.C block = .ok C') :
     (([.type (.data block) .empty]),
         { s with C := C'
@@ -621,7 +621,7 @@ theorem genDeclDatatype_complete_of_MutualADTWF {s : GenState} {b : Bounds}
     (hreclen : ∀ d ∈ block, d.constrs.length ≤ b.maxRecConstrs + 1)
     (hvocab : VocabOk s.C s.baseTypes (s.tyCons ++ s.dtCons))
     (hbv : ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, BitvecWidthOnly arg.2)
-    (hC : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+    (hC : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit _
       _ s.C block = .ok C') :
     ∃ sz, (([.type (.data block) .empty]),
         { s with C := C'
@@ -709,7 +709,7 @@ example (b : Bounds) (block : MutualDatatype Unit) (C' : LContext Core.CoreLPara
         b.maxArgs b.maxDatatypeSize initState.reserved))
     (hnamesAllowed : ∀ d ∈ block, isAllowedName d.name = true)
     (hnamesNotLocal : ∀ d ∈ block, isLocalTypeName d.name = false)
-    (hC : @LContext.addMutualBlock Core.CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+    (hC : @LContext.addMutualBlock Core.CoreLParams _ instInhabitedPUnit _
       _ initState.C block = .ok C') :
     (Core.Program.mk (decls := [.type (.data block) .empty])) ∈
       SPMF.support (genProgram (G := SPMF) 1 b) := by

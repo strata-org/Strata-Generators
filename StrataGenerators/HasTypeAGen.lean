@@ -34,8 +34,9 @@ theorem SPMF.le_always_default {α : Type} {p : α → Prop} :
 
 This module holds a random generator of well-typed Strata `LExpr` terms. Each generated term satisfies
 the `HasTypeA` relation. The proofs read the generator at Basalt's `SPMF`. The `LExprParams` are
-`LExprParams.mono ⟨Unit, Unit⟩`, which is unit metadata, unit identifier metadata and monotype
-annotations.
+`LExprParams.mono ⟨ExprSourceLoc, Unit⟩`, which is Core's source-location metadata, unit
+identifier metadata and monotype annotations. Every generated node carries the one location
+`genLoc`.
 
 ## Contents
 
@@ -113,34 +114,34 @@ private theorem list_map_ne_nil_of_length_pos {α β : Type} {xs : List α} {f :
   rw [List.length_map] at this
   omega
 
-/-- The support of `pickBVar` holds an expression if and only if the expression is `.bvar () i` for an
-    index `i` of `bvarsOfType bctx τ`. -/
+/-- The support of `pickBVar` holds an expression if and only if the expression is
+    `.bvar genLoc i` for an index `i` of `bvarsOfType bctx τ`. -/
 private theorem mem_support_pickBVar_iff {bctx : BVarCtx} {τ : LMonoTy}
     {hv : (bvarsOfType bctx τ).length > 0} {e : LExpr'} :
     e ∈ SPMF.support (pickBVar (G := SPMF) bctx τ hv) ↔
-      ∃ i ∈ bvarsOfType bctx τ, e = .bvar () i := by
+      ∃ i ∈ bvarsOfType bctx τ, e = .bvar genLoc i := by
   simp only [pickBVar, mem_support_elements_iff (list_map_ne_nil_of_length_pos hv), List.mem_map]
   constructor
   · rintro ⟨i, hmem, rfl⟩; exact ⟨i, hmem, rfl⟩
   · rintro ⟨i, hmem, rfl⟩; exact ⟨i, hmem, rfl⟩
 
 /-- The support of `pickFVar` holds an expression if and only if the expression is
-    `.fvar () ⟨name, ()⟩ (some τ)` for a name of `fvarsOfType fctx τ`. -/
+    `.fvar genLoc ⟨name, ()⟩ (some τ)` for a name of `fvarsOfType fctx τ`. -/
 private theorem mem_support_pickFVar_iff {fctx : FVarCtx} {τ : LMonoTy}
     {hv : (fvarsOfType fctx τ).length > 0} {e : LExpr'} :
     e ∈ SPMF.support (pickFVar (G := SPMF) fctx τ hv) ↔
-      ∃ name ∈ fvarsOfType fctx τ, e = .fvar () ⟨name, ()⟩ (some τ) := by
+      ∃ name ∈ fvarsOfType fctx τ, e = .fvar genLoc ⟨name, ()⟩ (some τ) := by
   simp only [pickFVar, mem_support_elements_iff (list_map_ne_nil_of_length_pos hv), List.mem_map]
   constructor
   · rintro ⟨name, hmem, rfl⟩; exact ⟨name, hmem, rfl⟩
   · rintro ⟨name, hmem, rfl⟩; exact ⟨name, hmem, rfl⟩
 
 /-- The support of `pickOp` holds an expression if and only if the expression is
-    `.op () ⟨name, ()⟩ (some τ)` for a name of `opsOfType octx τ`. -/
+    `.op genLoc ⟨name, ()⟩ (some τ)` for a name of `opsOfType octx τ`. -/
 private theorem mem_support_pickOp_iff {octx : OpCtx} {τ : LMonoTy}
     {hv : (opsOfType octx τ).length > 0} {e : LExpr'} :
     e ∈ SPMF.support (pickOp (G := SPMF) octx τ hv) ↔
-      ∃ name ∈ opsOfType octx τ, e = .op () ⟨name, ()⟩ (some τ) := by
+      ∃ name ∈ opsOfType octx τ, e = .op genLoc ⟨name, ()⟩ (some τ) := by
   simp only [pickOp, mem_support_elements_iff (list_map_ne_nil_of_length_pos hv), List.mem_map]
   constructor
   · rintro ⟨name, hmem, rfl⟩; exact ⟨name, hmem, rfl⟩
@@ -161,7 +162,7 @@ private theorem pickBVar_sound (bctx : BVarCtx) (τ : LMonoTy)
 private theorem pickBVar_complete (bctx : BVarCtx) (τ : LMonoTy) (i : Nat)
     (hget : bctx[i]? = some τ)
     (hv : (bvarsOfType bctx τ).length > 0) :
-    .bvar () i ∈ SPMF.support (pickBVar (G := SPMF) bctx τ hv) := by
+    .bvar genLoc i ∈ SPMF.support (pickBVar (G := SPMF) bctx τ hv) := by
   exact mem_support_pickBVar_iff.mpr ⟨i, (bvarsOfType_mem_iff bctx τ i).mpr hget, rfl⟩
 
 -- ── pickFVar soundness/completeness ───────────────────────────────────
@@ -198,7 +199,7 @@ private theorem pickFVar_sound (fctx : FVarCtx) (τ : LMonoTy)
 private theorem pickFVar_complete (fctx : FVarCtx) (τ : LMonoTy) (x : String)
     (hmem : (x, τ) ∈ fctx)
     (hv : (fvarsOfType fctx τ).length > 0) :
-    .fvar () ⟨x, ()⟩ (some τ) ∈ SPMF.support (pickFVar (G := SPMF) fctx τ hv) := by
+    .fvar genLoc ⟨x, ()⟩ (some τ) ∈ SPMF.support (pickFVar (G := SPMF) fctx τ hv) := by
   exact mem_support_pickFVar_iff.mpr ⟨x, (fvarsOfType_mem_iff fctx τ x).mpr hmem, rfl⟩
 
 -- ── pickOp soundness/completeness ─────────────────────────────────────
@@ -239,7 +240,7 @@ private theorem pickOp_sound (octx : OpCtx) (τ : LMonoTy)
 private theorem pickOp_complete (octx : OpCtx) (τ : LMonoTy) (x : String)
     (hmem : (x, τ) ∈ octx.ops)
     (hv : (opsOfType octx τ).length > 0) :
-    .op () ⟨x, ()⟩ (some τ) ∈ SPMF.support (pickOp (G := SPMF) octx τ hv) := by
+    .op genLoc ⟨x, ()⟩ (some τ) ∈ SPMF.support (pickOp (G := SPMF) octx τ hv) := by
   exact mem_support_pickOp_iff.mpr ⟨x, (opsOfType_mem_iff octx τ x).mpr hmem, rfl⟩
 
 -- ── genLMonoTy support ────────────────────────────────────────────────
@@ -966,7 +967,7 @@ private theorem genLExprBase_sound_aux (fctx : FVarCtx) (octx : OpCtx) (pctx : P
     all_goals first
       | assumption
       | (simp only [LExpr.boolConst, LExpr.intConst, LExpr.strConst, LExpr.rationalConst,
-          LExpr.bitvecConst]; exact .const)
+          LExpr.bitvecConst]; exact .const rfl)
   | succ n ih =>
     intro bctx τ
     -- The two `Indir` branches, typed by the recursive call at each argument.
@@ -993,7 +994,7 @@ private theorem genLExprBase_sound_aux (fctx : FVarCtx) (octx : OpCtx) (pctx : P
     all_goals first
       | assumption
       | (simp only [LExpr.boolConst, LExpr.intConst, LExpr.strConst, LExpr.rationalConst,
-          LExpr.bitvecConst]; exact .const)
+          LExpr.bitvecConst]; exact .const rfl)
       | (constructor <;> assumption)
 
 /-- Each expression in the support of `genLExprBase` is well-typed. The fallback for a type that the
@@ -1165,17 +1166,17 @@ private theorem genBiasedBitVec_support_set {w : Nat} (bv : BitVec w) :
 
 /-- Each binder name in the expression is the empty string. -/
 def emptyNames : LExpr' → Prop
-  | .boolConst () _                  => True
-  | .intConst () _                   => True
-  | .bvar () _                       => True
-  | .fvar () _ _                     => True
-  | .op () _ _                       => True
-  | .abs () name _ body              => name = "" ∧ emptyNames body
-  | .app () fn arg                   => emptyNames fn ∧ emptyNames arg
-  | .ite () c t e                    => emptyNames c ∧ emptyNames t ∧ emptyNames e
-  | .eq () e₁ e₂                     => emptyNames e₁ ∧ emptyNames e₂
-  | .quant () _ name _ tr body       => name = "" ∧ emptyNames tr ∧ emptyNames body
-  | .const () _                      => True
+  | .boolConst _ _                  => True
+  | .intConst _ _                   => True
+  | .bvar _ _                       => True
+  | .fvar _ _ _                     => True
+  | .op _ _ _                       => True
+  | .abs _ name _ body              => name = "" ∧ emptyNames body
+  | .app _ fn arg                   => emptyNames fn ∧ emptyNames arg
+  | .ite _ c t e                    => emptyNames c ∧ emptyNames t ∧ emptyNames e
+  | .eq _ e₁ e₂                     => emptyNames e₁ ∧ emptyNames e₂
+  | .quant _ _ name _ tr body       => name = "" ∧ emptyNames tr ∧ emptyNames body
+  | .const _ _                      => True
 
 -- ── termDepth measure ─────────────────────────────────────────────────
 
@@ -1188,16 +1189,16 @@ def emptyNames : LExpr' → Prop
     - The `quant` case also adds `monoTyDepth τ`, because the generator calls `genLMonoTy` at
       `depth - 1`, and that call needs `monoTyDepth τ ≤ depth - 1`. -/
 def termDepth (bctx : BVarCtx) : LExpr' → Nat
-  | .boolConst () _       => 0
-  | .intConst () _        => 0
-  | .bvar () _            => 0
-  | .fvar () _ _          => 0
-  | .op () _ _            => 0
-  | .abs () _ (some τ₁) body => termDepth (τ₁ :: bctx) body + 1
-  | .app () fn arg        => max (termDepth bctx fn) (termDepth bctx arg) + 1
-  | .ite () c t e         => max (termDepth bctx c) (max (termDepth bctx t) (termDepth bctx e)) + 1
-  | .eq () e₁ e₂          => max (termDepth bctx e₁) (termDepth bctx e₂) + 1
-  | .quant () _ _ (some τ) tr body =>
+  | .boolConst _ _       => 0
+  | .intConst _ _        => 0
+  | .bvar _ _            => 0
+  | .fvar _ _ _          => 0
+  | .op _ _ _            => 0
+  | .abs _ _ (some τ₁) body => termDepth (τ₁ :: bctx) body + 1
+  | .app _ fn arg        => max (termDepth bctx fn) (termDepth bctx arg) + 1
+  | .ite _ c t e         => max (termDepth bctx c) (max (termDepth bctx t) (termDepth bctx e)) + 1
+  | .eq _ e₁ e₂          => max (termDepth bctx e₁) (termDepth bctx e₂) + 1
+  | .quant _ _ _ (some τ) tr body =>
       max (monoTyDepth τ) (max (termDepth (τ :: bctx) tr) (termDepth (τ :: bctx) body)) + 1
   | _                     => 0
 
@@ -1207,40 +1208,40 @@ def termDepth (bctx : BVarCtx) : LExpr' → Nat
     from `genLMonoTy n` has a depth that is not more than `n`, and each subexpression satisfies
     `AllTypesSimple n`. -/
 inductive AllTypesSimple (tvars : List TyIdentifier) : Nat → BVarCtx → LExpr' → Prop where
-  | boolConst   : AllTypesSimple tvars n bctx (.boolConst () b)
-  | intConst    : AllTypesSimple tvars n bctx (.intConst () k)
+  | boolConst   : AllTypesSimple tvars n bctx (.boolConst genLoc b)
+  | intConst    : AllTypesSimple tvars n bctx (.intConst genLoc k)
   | strConst    : (∀ c ∈ s.toList, c ∈ StrataGenerators.PrimitiveGens.interestingChars) →
-                  AllTypesSimple tvars n bctx (.strConst () s)
+                  AllTypesSimple tvars n bctx (.strConst genLoc s)
   | rationalConst   : (r : Rat) →
-                  AllTypesSimple tvars n bctx (.rationalConst () r)
+                  AllTypesSimple tvars n bctx (.rationalConst genLoc r)
   | bitvecConst : (w : Nat) → (bv : BitVec w) →
-                  AllTypesSimple tvars n bctx (.bitvecConst () w bv)
-  | bvar      : AllTypesSimple tvars n bctx (.bvar () i)
-  | fvar      : AllTypesSimple tvars n bctx (.fvar () x (some τ))
-  | op        : AllTypesSimple tvars n bctx (.op () o (some τ))
+                  AllTypesSimple tvars n bctx (.bitvecConst genLoc w bv)
+  | bvar      : AllTypesSimple tvars n bctx (.bvar genLoc i)
+  | fvar      : AllTypesSimple tvars n bctx (.fvar genLoc x (some τ))
+  | op        : AllTypesSimple tvars n bctx (.op genLoc o (some τ))
   | abs       : τ₁ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars n) →
                 AllTypesSimple tvars n (τ₁ :: bctx) body →
-                AllTypesSimple tvars (n + 1) bctx (.abs () "" (some τ₁) body)
+                AllTypesSimple tvars (n + 1) bctx (.abs genLoc "" (some τ₁) body)
   | app       : (τ' : LMonoTy) →
                 HasTypeA' bctx arg τ' →
                 τ' ∈ SPMF.support (genLMonoTy (G := SPMF) tvars n) →
                 AllTypesSimple tvars n bctx fn → AllTypesSimple tvars n bctx arg →
-                AllTypesSimple tvars (n + 1) bctx (.app () fn arg)
+                AllTypesSimple tvars (n + 1) bctx (.app genLoc fn arg)
   | ite       : AllTypesSimple tvars n bctx c → AllTypesSimple tvars n bctx t →
                 AllTypesSimple tvars n bctx e →
-                AllTypesSimple tvars (n + 1) bctx (.ite () c t e)
+                AllTypesSimple tvars (n + 1) bctx (.ite genLoc c t e)
   | eq        : (τ' : LMonoTy) →
                 HasTypeA' bctx e₁ τ' → HasTypeA' bctx e₂ τ' →
                 τ' ∈ SPMF.support (genLMonoTy (G := SPMF) tvars n) →
                 AllTypesSimple tvars n bctx e₁ → AllTypesSimple tvars n bctx e₂ →
-                AllTypesSimple tvars (n + 1) bctx (.eq () e₁ e₂)
+                AllTypesSimple tvars (n + 1) bctx (.eq genLoc e₁ e₂)
   | quant     : τ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars n) →
                 (τ_tr : LMonoTy) →
                 τ_tr ∈ SPMF.support (genLMonoTy (G := SPMF) tvars n) →
                 HasTypeA' (τ :: bctx) tr τ_tr →
                 AllTypesSimple tvars n (τ :: bctx) tr →
                 AllTypesSimple tvars n (τ :: bctx) body →
-                AllTypesSimple tvars (n + 1) bctx (.quant () k "" (some τ) tr body)
+                AllTypesSimple tvars (n + 1) bctx (.quant genLoc k "" (some τ) tr body)
 
 -- ── termDepth bound for genLExpr ──────────────────────────────────────
 
@@ -1258,7 +1259,7 @@ theorem termDepth_mkApps_le (bctx : BVarCtx) (base : LExpr') (args : List LExpr'
   induction args generalizing base d with
   | nil => simpa [mkApps] using hbase
   | cons a rest ih =>
-    have hstep : termDepth bctx (LExpr.app () base a) ≤ d + 1 := by
+    have hstep : termDepth bctx (LExpr.app genLoc base a) ≤ d + 1 := by
       show max (termDepth bctx base) (termDepth bctx a) + 1 ≤ d + 1
       have := hargs a (by simp)
       omega
@@ -1267,10 +1268,10 @@ theorem termDepth_mkApps_le (bctx : BVarCtx) (base : LExpr') (args : List LExpr'
     -- `foldl_cons` gives `mkApps base (a :: rest) = mkApps (.app base a) rest`. The proof rewrites
     -- with that equation and does not unfold `mkApps`, so that the conclusion of the recursive call is
     -- *syntactically* about the same term.
-    have hfold : mkApps base (a :: rest) = mkApps (LExpr.app () base a) rest := by
+    have hfold : mkApps base (a :: rest) = mkApps (LExpr.app genLoc base a) rest := by
       simp only [mkApps, List.foldl_cons]
     rw [hfold, List.length_cons]
-    have hih := ih (LExpr.app () base a) (d + 1) hstep hrest
+    have hih := ih (LExpr.app genLoc base a) (d + 1) hstep hrest
     -- `hih : … ≤ (d + 1) + rest.length`; the goal is `… ≤ d + (rest.length + 1)`.
     omega
 
@@ -1510,7 +1511,7 @@ private theorem genLExprBase_termDepth_bound_aux (fctx : FVarCtx) (octx : OpCtx)
     -- The measure of an application spine over an `.op` head, which is what both `Indir` rules emit.
     have hspine : ∀ (nm : String) (annot : LMonoTy) (args : List LExpr'),
         (∀ a ∈ args, termDepth bctx a ≤ depthBudget K n) →
-        termDepth bctx (mkApps (.op () ⟨nm, ()⟩ (some annot)) args)
+        termDepth bctx (mkApps (.op genLoc ⟨nm, ()⟩ (some annot)) args)
           ≤ depthBudget K n + args.length :=
       fun nm annot args hall => termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall
     -- The two `Indir` branches, as facts. `genIndir_measure_le` and `genIndirPolyCore_measure_le`
@@ -1612,32 +1613,33 @@ end TermDepthBound
 
 -- ── Completeness for genLExpr ─────────────────────────────────────────
 
-/-- An inversion lemma. If `.eq () e₁ e₂` has the type `τ`, then `τ` is `.bool`. -/
+/-- An inversion lemma. If `.eq genLoc e₁ e₂` has the type `τ`, then `τ` is `.bool`. -/
 private theorem eq_hasType_bool {bctx : BVarCtx} {τ : LMonoTy} {e₁ e₂ : LExpr'}
-    (h : HasTypeA' bctx (.eq () e₁ e₂) τ) : τ = .bool := by cases h with | eq _ _ => rfl
+    (h : HasTypeA' bctx (.eq genLoc e₁ e₂) τ) : τ = .bool := by cases h with | eq _ _ => rfl
 
-/-- An inversion lemma. If `.quant () k name (some qty) tr body` has the type `τ`, then `τ` is
+/-- An inversion lemma. If `.quant genLoc k name (some qty) tr body` has the type `τ`, then `τ` is
     `.bool`. -/
 private theorem quant_hasType_bool {bctx : BVarCtx} {τ : LMonoTy} {k name qty tr body}
-    (h : HasTypeA' bctx (.quant () k name (some qty) tr body) τ) : τ = .bool := by
+    (h : HasTypeA' bctx (.quant genLoc k name (some qty) tr body) τ) : τ = .bool := by
   cases h with | quant _ _ => rfl
 
 /-- A predicate that says two things. Each free-variable name of the expression is in `fctx`, at the
     correct type. Each operator name of the expression is in the factory `F`. -/
 def allVarsInCtx (fctx : FVarCtx) (octx : OpCtx) : LExpr' → Prop
-  | .boolConst () _              => True
-  | .intConst () _               => True
-  | .bvar () _                   => True
-  | .fvar () x (some τ)         => (x.name, τ) ∈ fctx
-  | .fvar () _ none              => True
-  | .op () o (some τ)           => (o.name, τ) ∈ octx.ops
-  | .op () _ none                => True
-  | .abs () _ _ body             => allVarsInCtx fctx octx body
-  | .app () fn arg               => allVarsInCtx fctx octx fn ∧ allVarsInCtx fctx octx arg
-  | .ite () c t e                => allVarsInCtx fctx octx c ∧ allVarsInCtx fctx octx t ∧ allVarsInCtx fctx octx e
-  | .eq () e₁ e₂                 => allVarsInCtx fctx octx e₁ ∧ allVarsInCtx fctx octx e₂
-  | .quant () _ _ _ tr body      => allVarsInCtx fctx octx tr ∧ allVarsInCtx fctx octx body
-  | .const () _                  => True
+  | .boolConst _ _              => True
+  | .intConst _ _               => True
+  | .bvar _ _                   => True
+  | .fvar _ x (some τ)         => (x.name, τ) ∈ fctx
+  | .fvar _ _ none              => True
+  | .op _ o (some τ)           => (o.name, τ) ∈ octx.ops
+  | .op _ _ none                => True
+  | .abs _ _ _ body             => allVarsInCtx fctx octx body
+  | .app _ fn arg               => allVarsInCtx fctx octx fn ∧ allVarsInCtx fctx octx arg
+  | .ite _ c t e                =>
+    allVarsInCtx fctx octx c ∧ allVarsInCtx fctx octx t ∧ allVarsInCtx fctx octx e
+  | .eq _ e₁ e₂                 => allVarsInCtx fctx octx e₁ ∧ allVarsInCtx fctx octx e₂
+  | .quant _ _ _ _ tr body      => allVarsInCtx fctx octx tr ∧ allVarsInCtx fctx octx body
+  | .const _ _                  => True
 
 -- ── The completeness walk ─────────────────────────────────────────────
 --
@@ -1707,7 +1709,8 @@ local macro "complete_arm_zero" : tactic => `(tactic| (
   rw [SPMF.mem_support_iff_may]
   cases hats <;> (try cases hwt)
   all_goals walk [natArbitrary_complete.obs, genInterestingString_complete.obs, genRat_complete.obs, (genBiasedBitVec_complete _).obs, default_complete.obs]
-  all_goals try (exact absurd (HasTypeA_unique hwt .const) (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int, LMonoTy.string, LMonoTy.real, LMonoTy.arrow]))
+  all_goals try (exact absurd (HasTypeA_unique hwt (.const rfl)) (by
+    simp [LConst.ty, LMonoTy.bool, LMonoTy.int, LMonoTy.string, LMonoTy.real, LMonoTy.arrow]))
   all_goals simp_all [List.mem_map, bvarsOfType_mem_iff, fvarsOfType_mem_iff, opsOfType_mem_iff,
     ite_prop_iff_or, List.length_pos_iff_exists_mem, allVarsInCtx, LExpr.boolConst, LExpr.intConst,
     LExpr.strConst, LExpr.rationalConst, LExpr.bitvecConst, int_cover']
@@ -1723,7 +1726,8 @@ local macro "complete_arm_succ" : tactic => `(tactic| (
   all_goals clear hC hA hG
   all_goals unify_types
   all_goals try (exfalso; have h := LExpr.HasTypeA_to_typeCheck hwt; simp [LExpr.typeCheck, bind, Option.bind] at h; split at h <;> simp_all [LMonoTy.arrow, LMonoTy.bool, LMonoTy.int, LMonoTy.string, LMonoTy.real, LMonoTy.regex, LMonoTy.map, LMonoTy.seq]; done)
-  all_goals try (exact absurd (HasTypeA_unique hwt .const) (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int, LMonoTy.string, LMonoTy.real, LMonoTy.arrow]))
+  all_goals try (exact absurd (HasTypeA_unique hwt (.const rfl)) (by
+    simp [LConst.ty, LMonoTy.bool, LMonoTy.int, LMonoTy.string, LMonoTy.real, LMonoTy.arrow]))
   all_goals try (exact absurd (eq_hasType_bool hwt) (by simp [LMonoTy.bool, LMonoTy.int, LMonoTy.string, LMonoTy.real, LMonoTy.regex, LMonoTy.arrow, LMonoTy.map, LMonoTy.seq]))
   all_goals try (exact absurd (quant_hasType_bool hwt) (by simp [LMonoTy.bool, LMonoTy.int, LMonoTy.string, LMonoTy.real, LMonoTy.regex, LMonoTy.arrow, LMonoTy.map, LMonoTy.seq]))
   all_goals simp_all [List.mem_map, bvarsOfType_mem_iff, fvarsOfType_mem_iff, opsOfType_mem_iff,
@@ -1806,7 +1810,8 @@ theorem genLMonoTy_isSoundAndComplete {tvars : List TyIdentifier} {n : Nat} :
 
 -- ── Quick test ────────────────────────────────────────────────────────
 
--- This `ToFormat` instance lets the code print a generated `LExpr`. The metadata type is `Unit`.
+-- This `ToFormat` instance lets the code print a generated `LExpr`. The identifier metadata is
+-- `Unit`.
 attribute [local instance] unitToFormat
 
 -- Print five random expressions. Two examples of the output are:
@@ -2141,8 +2146,8 @@ theorem mkApps_hasType_inv (bctx : BVarCtx) (base : LExpr') (args : List LExpr')
     -- `mkApps base [] = base`, so `base` has the type `τ`, and there is no arrow to remove.
     exact ⟨[], hwt, .nil⟩
   | cons a as ih =>
-    -- `mkApps base (a :: as) = mkApps (.app () base a) as`.
-    obtain ⟨argTys', hbase', hargs'⟩ := ih (.app () base a) hwt
+    -- `mkApps base (a :: as) = mkApps (.app genLoc base a) as`.
+    obtain ⟨argTys', hbase', hargs'⟩ := ih (.app genLoc base a) hwt
     -- Invert the application at the head. Then `base` has the type `aty → (argTys'.foldr arrow τ)`,
     -- and `a` has the type `aty`. The type `aty` stays implicit, and unification finds it from `hfn`
     -- against the goal.
@@ -2585,7 +2590,7 @@ theorem genIndir_sound (octx : OpCtx) (bctx : BVarCtx) (τ : LMonoTy)
 /-- The soundness of `genIndirPoly`. Each generated expression is well-typed.
 
     The proof uses one structural fact: `genIndirPoly` gives either the `genLExprBase` fallback, when no
-    candidate matches, or a spine `mkApps (.op () ⟨name, ()⟩ (some fullArrowTy)) args`, where
+    candidate matches, or a spine `mkApps (.op genLoc ⟨name, ()⟩ (some fullArrowTy)) args`, where
     `fullArrowTy` is `concreteArgTys.foldr arrow τ`.
 
     For the spine, the proof has three steps:
@@ -2663,7 +2668,7 @@ private theorem fvarsOfType_subset_keys (fctx : FVarCtx) (τ : LMonoTy) (name : 
 
 private theorem getVars_fvar_subset (fctx : FVarCtx) (τ : LMonoTy) (name : String)
     (h : name ∈ fvarsOfType fctx τ) :
-    LExpr.getVars (LExpr.fvar () ⟨name, ()⟩ (some τ) : LExpr') ⊆
+    LExpr.getVars (LExpr.fvar genLoc ⟨name, ()⟩ (some τ) : LExpr') ⊆
       fctx.map (fun p => (⟨p.1, ()⟩ : Lambda.Identifier Unit)) := by
   intro y hy
   simp only [LExpr.getVars, List.mem_singleton] at hy
@@ -3922,9 +3927,9 @@ private theorem sampledTys_mem_support (generableTys : List LMonoTy)
               rest, ih rest hrest (fun σ hσ => hValid σ (by simp [hσ])), rfl⟩
 
 /-- The completeness of `genIndirPoly`. Take an expression of the form
-    `mkApps (.op () ⟨name, ()⟩ (some fullArrowTy)) args`, where `(name, concreteArgTys)` is a valid entry
-    of `findPolymorphicOps` at some list of sampled types, and each argument is in the support of
-    `genLExprBase`. Then the expression is in the support of `genIndirPoly`. -/
+    `mkApps (.op genLoc ⟨name, ()⟩ (some fullArrowTy)) args`, where `(name, concreteArgTys)` is a
+    valid entry of `findPolymorphicOps` at some list of sampled types, and each argument is in the
+    support of `genLExprBase`. Then the expression is in the support of `genIndirPoly`. -/
 theorem genIndirPoly_complete (fctx : FVarCtx) (octx : OpCtx)
     (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
@@ -3943,7 +3948,7 @@ theorem genIndirPoly_complete (fctx : FVarCtx) (octx : OpCtx)
     (args : List LExpr')
     (hArgs : List.Forall₂ (fun arg σ => arg ∈ SPMF.support (genArg σ)) args concreteArgTys) :
     let fullArrowTy := concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
-    mkApps (.op () ⟨name, ()⟩ (some fullArrowTy)) args ∈
+    mkApps (.op genLoc ⟨name, ()⟩ (some fullArrowTy)) args ∈
       SPMF.support
         (genIndirPoly (G := SPMF) fctx octx pctx tvars bctx depth τ maxNumArgs
           genArg) := by
@@ -4054,7 +4059,7 @@ def IsPolyApp (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
              | n + 1 => fun σ' =>
                  genLExpr (G := SPMF) fctx octx pctx tvars bctx n σ' maxNumArgs) σ))
       args concreteArgTys ∧
-    e = mkApps (.op () ⟨name, ()⟩
+    e = mkApps (.op genLoc ⟨name, ()⟩
       (some (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) args
 
 /-- **The backward direction for the polymorphic case, at the level of the specification.**
@@ -4084,7 +4089,7 @@ theorem isPolyApp_of_hasType (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (name : String) (annot : LMonoTy) (args : List LExpr')
     -- The expression is a spine over an `.op` node that holds the annotation `annot`.
-    (hwt : HasTypeA' bctx (mkApps (.op () ⟨name, ()⟩ (some annot)) args) τ)
+    (hwt : HasTypeA' bctx (mkApps (.op genLoc ⟨name, ()⟩ (some annot)) args) τ)
     -- The side condition about unification. The search of the generator over the split points finds this
     -- operator at the argument types that the typing derivation gives.
     (sampledTys : List LMonoTy) (concreteArgTys : List LMonoTy)
@@ -4110,7 +4115,7 @@ theorem isPolyApp_of_hasType (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         AllTypesSimple tvars (depth - 1) bctx arg ∧ termDepth bctx arg ≤ depth - 1)
       args concreteArgTys) :
     IsPolyApp fctx octx pctx tvars bctx depth τ maxNumArgs
-      (mkApps (.op () ⟨name, ()⟩ (some annot)) args) := by
+      (mkApps (.op genLoc ⟨name, ()⟩ (some annot)) args) := by
   -- Invert the spine, which gives the argument types `argTys` and the type of each argument.
   obtain ⟨argTys, hbase, hargsTyped⟩ := mkApps_hasType_inv bctx _ args τ hwt
   -- The `.op` node has the type of its annotation, so `annot` is `argTys.foldr arrow τ`.
@@ -4348,7 +4353,7 @@ theorem isPolyApp_of_hasType_specShaped
     (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (name : String) (annot : LMonoTy) (args : List LExpr')
-    (hwt : HasTypeA' bctx (mkApps (.op () ⟨name, ()⟩ (some annot)) args) τ)
+    (hwt : HasTypeA' bctx (mkApps (.op genLoc ⟨name, ()⟩ (some annot)) args) τ)
     (sampledTys : List LMonoTy) (concreteArgTys : List LMonoTy)
     (hLen : sampledTys.length = max maxNumArgs (maxBinders pctx))
     (hValid : ∀ σ ∈ sampledTys,
@@ -4368,7 +4373,7 @@ theorem isPolyApp_of_hasType_specShaped
     (hgen : generableTypesFromCtx bctx fctx octx ≠ [])
     (hInst : SchemeInstAt fctx octx pctx bctx τ name concreteArgTys maxNumArgs) :
     IsPolyApp fctx octx pctx tvars bctx depth τ maxNumArgs
-      (mkApps (.op () ⟨name, ()⟩ (some annot)) args) := by
+      (mkApps (.op genLoc ⟨name, ()⟩ (some annot)) args) := by
   obtain ⟨boundVars, monoTy, freshBoundVars, freshMonoTy, schemeArgTys, retTy, k, Sm,
     hmem, hfresh, hdec, harity, hk, hclosed, hmatch, hdet, hprefix⟩ := hInst
   -- The proof *derives* the two well-formedness conditions from the closedness of the scheme, and it
@@ -4480,7 +4485,7 @@ theorem genLExpr_complete_poly_specShaped
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (hτ : ∃ m, τ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars m))
     (name : String) (annot : LMonoTy) (args : List LExpr')
-    (hwt : HasTypeA' bctx (mkApps (.op () ⟨name, ()⟩ (some annot)) args) τ)
+    (hwt : HasTypeA' bctx (mkApps (.op genLoc ⟨name, ()⟩ (some annot)) args) τ)
     (sampledTys : List LMonoTy) (concreteArgTys : List LMonoTy)
     (hLen : sampledTys.length = max maxNumArgs (maxBinders pctx))
     (hValid : ∀ σ ∈ sampledTys,
@@ -4499,7 +4504,7 @@ theorem genLExpr_complete_poly_specShaped
         emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
         AllTypesSimple tvars (depth - 1) bctx arg ∧ termDepth bctx arg ≤ depth - 1)
       args concreteArgTys) :
-    (mkApps (.op () ⟨name, ()⟩ (some annot)) args)
+    (mkApps (.op genLoc ⟨name, ()⟩ (some annot)) args)
       ∈ SPMF.support
         (genLExpr (G := SPMF) fctx octx pctx tvars bctx depth τ maxNumArgs) :=
   genLExpr_complete fctx octx pctx tvars bctx depth τ hτ maxNumArgs _
@@ -4548,7 +4553,7 @@ theorem genLExpr_complete_poly_fullySpecShaped
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (hτ : ∃ m, τ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars m))
     (name : String) (annot : LMonoTy) (args : List LExpr')
-    (hwt : HasTypeA' bctx (mkApps (.op () ⟨name, ()⟩ (some annot)) args) τ)
+    (hwt : HasTypeA' bctx (mkApps (.op genLoc ⟨name, ()⟩ (some annot)) args) τ)
     (sampledTys : List LMonoTy) (concreteArgTys : List LMonoTy)
     (hLen : sampledTys.length = max maxNumArgs (maxBinders pctx))
     (hValid : ∀ σ ∈ sampledTys,
@@ -4567,7 +4572,7 @@ theorem genLExpr_complete_poly_fullySpecShaped
       args concreteArgTys)
     (hgen : generableTypesFromCtx bctx fctx octx ≠ [])
     (hInst : SchemeInstAt fctx octx pctx bctx τ name concreteArgTys maxNumArgs) :
-    (mkApps (.op () ⟨name, ()⟩ (some annot)) args)
+    (mkApps (.op genLoc ⟨name, ()⟩ (some annot)) args)
       ∈ SPMF.support
         (genLExpr (G := SPMF) fctx octx pctx tvars bctx depth τ maxNumArgs) :=
   genLExpr_complete fctx octx pctx tvars bctx depth τ hτ maxNumArgs _
@@ -4619,13 +4624,13 @@ theorem genLExprBase_complete_polyApp (fctx : FVarCtx) (octx : OpCtx)
     (hArgs : List.Forall₂
       (fun arg σ => arg ∈ SPMF.support
         (genLExprBase (G := SPMF) fctx octx pctx tvars bctx n σ)) args concreteArgTys) :
-    mkApps (.op () ⟨name, ()⟩
+    mkApps (.op genLoc ⟨name, ()⟩
       (some (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) .bool))) args
       ∈ SPMF.support
         (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (n + 1) .bool) := by
   -- First, the term is in the support of `genIndirPolyCore`, at the argument generator that the branch
   -- gives.
-  have hcore : mkApps (.op () ⟨name, ()⟩
+  have hcore : mkApps (.op genLoc ⟨name, ()⟩
       (some (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) LMonoTy.bool))) args
       ∈ SPMF.support (genIndirPolyCore (G := SPMF) fctx octx pctx bctx .bool
           (genLExprBase fctx octx pctx tvars bctx n)
@@ -4665,7 +4670,7 @@ theorem genLExprBase_polyApp_under_ite (fctx : FVarCtx) (octx : OpCtx)
       (genLExprBase (G := SPMF) fctx octx pctx tvars bctx n .bool))
     (elseArm : LExpr') (helse : elseArm ∈ SPMF.support
       (genLExprBase (G := SPMF) fctx octx pctx tvars bctx n .bool)) :
-    (.ite () c polyApp elseArm : LExpr')
+    (.ite genLoc c polyApp elseArm : LExpr')
       ∈ SPMF.support
         (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (n + 1) .bool) := by
   rw [norm_bool]
@@ -4696,7 +4701,7 @@ theorem genLExprBase_polyApp_under_quant (fctx : FVarCtx) (octx : OpCtx)
       (genLExprBase (G := SPMF) fctx octx pctx tvars (τ' :: bctx) n τ_tr))
     (body : LExpr') (hbody : body ∈ SPMF.support
       (genLExprBase (G := SPMF) fctx octx pctx tvars (τ' :: bctx) n .bool)) :
-    (.quant () k "" (some τ') tr body : LExpr')
+    (.quant genLoc k "" (some τ') tr body : LExpr')
       ∈ SPMF.support
         (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (n + 1) .bool) := by
   rw [norm_bool]

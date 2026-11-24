@@ -144,8 +144,8 @@ def mapCmdTys (f : LMonoTy → LMonoTy) : Command → Command
   | .cmd (.assert l e md) => .cmd (.assert l (mapExprTys f e) md)
   | .cmd (.assume l e md) => .cmd (.assume l (mapExprTys f e) md)
   | .cmd (.cover l e md) => .cmd (.cover l (mapExprTys f e) md)
-  | .call p args md =>
-    .call p (args.map (fun a =>
+  | .call p tyArgs args md =>
+    .call p (tyArgs.map (·.map (mapLTy f))) (args.map (fun a =>
       match a with
       | .inArg e => .inArg (mapExprTys f e)
       | a => a)) md

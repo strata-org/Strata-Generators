@@ -160,7 +160,7 @@ theorem mem_opsOfType (octx : OpCtx) (τ : LMonoTy) (name : String)
     `OpsConsistentR.op_in` needs, under the identity substitution. -/
 theorem pickOp_opsConsistentR (F : @Factory LExprParams') (τ : LMonoTy) (name : String)
     (hmem : name ∈ opsOfType (factoryOps F) τ) :
-    Lambda.OpsConsistentR F (.op () ⟨name, ()⟩ (some τ)) := by
+    Lambda.OpsConsistentR F (.op genLoc ⟨name, ()⟩ (some τ)) := by
   have hoctx : (name, τ) ∈ (factoryOps F).ops := mem_opsOfType _ _ _ hmem
   obtain ⟨fn, hget, hτ⟩ := factoryOps_mem_char F name τ hoctx
   -- The equation `τ = genericTy` gives the instance under the identity substitution.
@@ -177,7 +177,7 @@ private theorem list_map_ne_nil_of_length_pos' {α β : Type} {xs : List α} {f 
 theorem mem_support_pickOp_iff' {octx : OpCtx} {τ : LMonoTy}
     {hv : (opsOfType octx τ).length > 0} {e : LExpr'} :
     e ∈ SPMF.support (pickOp (G := SPMF) octx τ hv) ↔
-      ∃ name ∈ opsOfType octx τ, e = .op () ⟨name, ()⟩ (some τ) := by
+      ∃ name ∈ opsOfType octx τ, e = .op genLoc ⟨name, ()⟩ (some τ) := by
   simp only [mem_support_pure_iff, pickOp, mem_support_elements_iff (list_map_ne_nil_of_length_pos' hv), List.mem_map]
   constructor
   · rintro ⟨name, hmem, rfl⟩; exact ⟨name, hmem, rfl⟩
@@ -283,7 +283,7 @@ theorem findOpsInCtx_mem' {octx : OpCtx} {τ : LMonoTy}
 theorem indir_op_opsConsistentR (F : @Factory LExprParams') (τ : LMonoTy)
     (name : String) (argTys : List LMonoTy)    (hmem : (name, argTys) ∈ findOpsInCtx (factoryOps F) τ) :
     Lambda.OpsConsistentR F
-      (.op () ⟨name, ()⟩ (some (argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) := by
+      (.op genLoc ⟨name, ()⟩ (some (argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) := by
   obtain ⟨hoctx, _⟩ := findOpsInCtx_mem' hmem
   obtain ⟨fn, hget, hty⟩ := factoryOps_mem_char F name _ hoctx
   exact .op_in (tySubst := []) hget (by rw [hty]; exact (LMonoTy.subst_of_hasEmptyScopes (by simp) _).symm)
@@ -316,7 +316,7 @@ def PolyOpsConsistentR (F : @Factory LExprParams') (pctx : PolyOpCtx)
       findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx (factoryOps F))
         sampledTys maxNumArgs →
     Lambda.OpsConsistentR F
-      (.op () ⟨name, ()⟩ (some (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)))
+      (.op genLoc ⟨name, ()⟩ (some (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)))
 
 /-- `decomposeArrow` inverts the fold that builds an arrow type that nests to the right. -/
 theorem decomposeArrow_foldr (t : LMonoTy) :
@@ -1118,7 +1118,7 @@ theorem foldr_arrow_split (l : List LMonoTy) (t : LMonoTy) (k : Nat) :
     substitution, and it names no implicit argument of the constructor. -/
 theorem opsConsistentR_op_inv (F : @Factory LExprParams') (name : String)
     (annot : LMonoTy)
-    (h : Lambda.OpsConsistentR F (.op () ⟨name, ()⟩ (some annot))) :
+    (h : Lambda.OpsConsistentR F (.op genLoc ⟨name, ()⟩ (some annot))) :
     F[name]? = none ∨
       ∃ (fn : LFunc LExprParams') (T : Lambda.Subst), F[name]? = some fn ∧
         annot = LMonoTy.subst T (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd)) := by
@@ -1164,7 +1164,7 @@ theorem schemeInstAt_of_opsConsistentR
     (boundVars : List TyIdentifier) (monoTy : LMonoTy)
     (hPctx : PCtxWF F pctx)
     (hmem : (name, Lambda.LTy.forAll boundVars monoTy) ∈ pctx)
-    (hops : Lambda.OpsConsistentR F (.op () ⟨name, ()⟩ (some annot)))
+    (hops : Lambda.OpsConsistentR F (.op genLoc ⟨name, ()⟩ (some annot)))
     (hAnnot : annot = concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
     (hclosed : ∀ v ∈ monoTy.freeVars, v ∈ boundVars)
     (harity : (decomposeArrow monoTy).1.length ≤ maxNumArgs)
@@ -1297,7 +1297,7 @@ theorem mkApps_opsConsistentR_inv (F : @Factory LExprParams') (base : LExpr')
   induction args generalizing base with
   | nil => simpa only [mkApps, List.foldl_nil] using h
   | cons a rest ih =>
-    have h' := ih (.app () base a) (by simpa only [mkApps, List.foldl_cons] using h)
+    have h' := ih (.app genLoc base a) (by simpa only [mkApps, List.foldl_cons] using h)
     cases h' with
     | app hbase _ => exact hbase
 
@@ -1328,8 +1328,8 @@ theorem genLExpr_complete_poly_opsConsistentR
     (name : String) (annot : LMonoTy) (args : List LExpr')
     (concreteArgTys : List LMonoTy)
     (boundVars : List TyIdentifier) (monoTy : LMonoTy)
-    (hwt : HasTypeA' bctx (mkApps (.op () ⟨name, ()⟩ (some annot)) args) τ)
-    (hops : Lambda.OpsConsistentR F (mkApps (.op () ⟨name, ()⟩ (some annot)) args))
+    (hwt : HasTypeA' bctx (mkApps (.op genLoc ⟨name, ()⟩ (some annot)) args) τ)
+    (hops : Lambda.OpsConsistentR F (mkApps (.op genLoc ⟨name, ()⟩ (some annot)) args))
     (sampledTys : List LMonoTy)
     (hLen : sampledTys.length = max maxNumArgs (maxBinders pctx))
     (hValid : ∀ σ ∈ sampledTys,
@@ -1357,7 +1357,7 @@ theorem genLExpr_complete_poly_opsConsistentR
       ∀ v ∈ σ.freeVars,
       v ∈ (((decomposeArrow monoTy).1.drop concreteArgTys.length).foldr
         (fun σ acc => LMonoTy.arrow σ acc) (decomposeArrow monoTy).2).freeVars) :
-    (mkApps (.op () ⟨name, ()⟩ (some annot)) args)
+    (mkApps (.op genLoc ⟨name, ()⟩ (some annot)) args)
       ∈ SPMF.support
         (genLExpr (G := SPMF) fctx octx pctx tvars bctx depth τ maxNumArgs) :=
   genLExpr_complete_poly_fullySpecShaped fctx octx pctx tvars bctx depth τ hτ name annot args

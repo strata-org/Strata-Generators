@@ -283,7 +283,7 @@ def shrinkDecl : Decl → List Decl
 
 mutual
 /-- Whether an expression mentions a free variable. A top-level `distinct` element
-    of the form `.fvar () ⟨v, ()⟩ (some τ)` names a variable no legal Core program
+    of the form `.fvar genLoc ⟨v, ()⟩ (some τ)` names a variable no legal Core program
     can bind, which is what the algorithm rejects. (`genDistinctAssertion` does not
     produce this shape.) -/
 def exprHasFvar : Expression.Expr → Bool
@@ -538,7 +538,7 @@ def minimizeProgramCounterexample (check : Program → Bool) (fuel : Nat := 200)
 
 section Guards
 
-private def trueExpr : Expression.Expr := .const () (.boolConst true)
+private def trueExpr : Expression.Expr := .const genLoc (.boolConst true)
 
 /-- An abstract type of arity 2: `type G _ _;`. -/
 private def conDecl : Decl :=
@@ -550,7 +550,7 @@ private def axDecl : Decl := .ax { name := "a0", e := trueExpr } .empty
 /-- A `distinct` declaration over two closed integer literals. It holds no free variable, so the algorithm
     accepts it, and it does not accept a generated one. -/
 private def distinctDecl : Decl :=
-  .distinct ⟨"d0", ()⟩ [.const () (.intConst 0), .const () (.intConst 1)] .empty
+  .distinct ⟨"d0", ()⟩ [.const genLoc (.intConst 0), .const genLoc (.intConst 1)] .empty
 
 /-- The alias `type S x := Sequence x;`, whose `typeArgs` field comes from the body, as `mkAliasDecl`
     computes it. -/
@@ -729,8 +729,8 @@ private def argDT : LDatatype Unit :=
 private def precondFunc : Function :=
   { name := ⟨"f0", ()⟩, typeArgs := [], inputs := [(⟨"y", ()⟩, .int)], output := .bool,
     body := some trueExpr,
-    preconditions := [{ expr := .eq () (.fvar () ⟨"y", ()⟩ (some .int))
-                                       (.const () (.intConst 0)), md := () }] }
+    preconditions := [{ expr := .eq genLoc (.fvar genLoc ⟨"y", ()⟩ (some .int))
+                                       (.const genLoc (.intConst 0)), md := genLoc }] }
 /-- The same function with the input removed, so its `requires` clause names a variable that nothing
     declares. -/
 private def precondFuncDangling : Function := { precondFunc with inputs := [] }
@@ -747,7 +747,7 @@ def precondFuncDanglingRejected : Bool :=
 -- The filter also rejects a clause whose type is not `bool`, which is the other condition that no check of
 -- Strata gives.
 #guard funcWellFormed { precondFunc with
-  preconditions := [{ expr := .const () (.intConst 0), md := () }] } == false
+  preconditions := [{ expr := .const genLoc (.intConst 0), md := genLoc }] } == false
 
 -- THE PRECONDITION REDUCTIONS. Dropping the clause is offered...
 #guard (shrinkDecl (.func precondFunc .empty)).any
@@ -757,9 +757,9 @@ def precondFuncDanglingRejected : Bool :=
 -- `requires (y == 0) == true` reduces to `requires y == 0`.
 private def nestedPrecondFunc : Function :=
   { precondFunc with
-    preconditions := [{ expr := .eq () (.eq () (.fvar () ⟨"y", ()⟩ (some .int))
-                                               (.const () (.intConst 0)))
-                                       trueExpr, md := () }] }
+    preconditions := [{ expr := .eq genLoc (.eq genLoc (.fvar genLoc ⟨"y", ()⟩ (some .int))
+                                               (.const genLoc (.intConst 0)))
+                                       trueExpr, md := genLoc }] }
 #guard funcWellFormed nestedPrecondFunc == true
 #guard (shrinkDecl (.func nestedPrecondFunc .empty)).any
   (fun | .func f _ => f.preconditions == precondFunc.preconditions | _ => false) == true
@@ -802,7 +802,7 @@ private def nestedPrecondFunc : Function :=
 -- A checker that enforces recursion for a measure rejects a `decreases` clause on a function that
 -- is not recursive, so a non-recursive function with a measure is rejected whatever its inputs.
 private def measureFunc : Function :=
-  { precondFunc with preconditions := [], measure := some (.fvar () ⟨"y", ()⟩ (some .int)) }
+  { precondFunc with preconditions := [], measure := some (.fvar genLoc ⟨"y", ()⟩ (some .int)) }
 def measureFuncRejected : Bool := progTypeChecks (prog [.func measureFunc .empty]) == false
 def measureFuncNoInputsRejected : Bool :=
   progTypeChecks (prog [.func { measureFunc with inputs := [] } .empty]) == false
@@ -825,27 +825,29 @@ private def recBlock : Decl :=
     algorithm-rejected. Hand-built here, since `genDistinctAssertion` emits `.op`s
     at declared constants instead. -/
 private def fvarDistinctDecl : Decl :=
-  .distinct ⟨"d1", ()⟩ [.fvar () ⟨"v", ()⟩ (some .int)] .empty
+  .distinct ⟨"d1", ()⟩ [.fvar genLoc ⟨"v", ()⟩ (some .int)] .empty
 
 /-- A top-level function with a `decreases` clause and no body, which is the gap about a measure with no
     body. -/
 private def measureNoBodyDecl : Decl :=
   .func { name := ⟨"f1", ()⟩, typeArgs := [], inputs := [], output := .bool,
-          body := none, measure := some (.const () (.intConst 0)) } .empty
+          body := none, measure := some (.const genLoc (.intConst 0)) } .empty
 
 /-- A non-recursive function with a body and the measure `0`. The specification accepts it, and
     the checker rejects a measure on a function that does not call itself. -/
 private def measureNonRecDecl : Decl :=
   .func { name := ⟨"f2", ()⟩, typeArgs := [], inputs := [], output := .bool,
-          body := some trueExpr, measure := some (.const () (.intConst 0)) } .empty
+          body := some trueExpr, measure := some (.const genLoc (.intConst 0)) } .empty
 
 /-- An axiom that compares `Sequence.length Sequence.empty` with `0`, with no annotation on either
     operator. Nothing fixes the element type of the empty sequence, so the checker types it at a
     generated type variable and rejects the axiom. -/
 private def openInstanceDecl : Decl :=
   .ax { name := "a2",
-        e := .eq () (.app () (.op () ⟨"Sequence.length", ()⟩ none) (.op () ⟨"Sequence.empty", ()⟩ none))
-               (.const () (.intConst 0)) } .empty
+        e := .eq genLoc
+               (.app genLoc (.op genLoc ⟨"Sequence.length", ()⟩ none)
+                 (.op genLoc ⟨"Sequence.empty", ()⟩ none))
+               (.const genLoc (.intConst 0)) } .empty
 
 /-- An axiom applying `id`, a name `Core.Factory` does not define.
 
@@ -855,7 +857,7 @@ private def openInstanceDecl : Decl :=
     an operator that the factory does not define, and such a name makes this gap reachable. -/
 private def unknownOpDecl : Decl :=
   .ax { name := "a1",
-        e := .app () (.op () ⟨"id", ()⟩ (some (.arrow .bool .bool))) trueExpr } .empty
+        e := .app genLoc (.op genLoc ⟨"id", ()⟩ (some (.arrow .bool .bool))) trueExpr } .empty
 
 /-- The `distinct` shape the generator emits: `.op` elements at 0-ary constants
     (Core's constants) that the same step declares just before the `distinct`.
@@ -865,7 +867,7 @@ private def opDistinctDecls : List Decl :=
   [ .func { name := ⟨"c0", ()⟩, typeArgs := [], inputs := [], output := .int } .empty,
     .func { name := ⟨"c1", ()⟩, typeArgs := [], inputs := [], output := .int } .empty,
     .distinct ⟨"d2", ()⟩
-      [.op () ⟨"c0", ()⟩ (some .int), .op () ⟨"c1", ()⟩ (some .int)] .empty ]
+      [.op genLoc ⟨"c0", ()⟩ (some .int), .op genLoc ⟨"c1", ()⟩ (some .int)] .empty ]
 #guard progTypeChecks (prog opDistinctDecls) == true
 -- The constants have to be *there*: the same `distinct` without them is rejected,
 -- which is why `genDeclDistinct` emits the two together or not at all.
@@ -887,10 +889,11 @@ private def procWithBody (name : String) (ss : List Statement) : Decl :=
           spec := { preconditions := [], postconditions := [] }
           body := .structured ss } .empty
 
-/-- A function with the reserved type parameter `$__ty0`. -/
+/-- The function `function g0<$__ty0> (x : $__ty0) : $__ty0`, which uses its reserved type
+    parameter. -/
 private def reservedTyArgDecl : Decl :=
-  .func { name := ⟨"g0", ()⟩, typeArgs := ["$__ty0"], inputs := [], output := .bool,
-          body := some trueExpr } .empty
+  .func { name := ⟨"g0", ()⟩, typeArgs := ["$__ty0"],
+          inputs := [(⟨"x", ()⟩, .ftvar "$__ty0")], output := .ftvar "$__ty0" } .empty
 
 /-- An axiom named like `funcDecl`. -/
 private def axNamedF0 : Decl := .ax { name := "f0", e := trueExpr } .empty
@@ -903,10 +906,22 @@ private def varFunctionClashDecl : Decl :=
 private def localTypeClashDecl : Decl :=
   procWithBody "P2" [.typeDecl { name := "P2", params := [] } .empty]
 
+-- The checker accepts a function that uses the reserved type parameter `$__ty0`, and it renames
+-- the parameter everywhere in the output.
+def reservedTyArgRenamed : Bool :=
+  match Program.typeCheck stmtCheckContext TEnv.default (prog [reservedTyArgDecl]) with
+  | .ok (p', _) =>
+    match p'.decls with
+    | [.func f _] =>
+      match f.typeArgs with
+      | [a] => a != "$__ty0" && f.inputs.map (·.2) == [.ftvar a] && f.output == .ftvar a
+      | _ => false
+    | _ => false
+  | .error _ => false
+-- The oracle tags every reserved type parameter, including one the checker renames and accepts.
+#guard expectedRejectionCauses (prog [reservedTyArgDecl]) == ["reserved-name"]
 -- Each expected cause on its own: a checker that enforces reserved names and name clashes
 -- rejects the program, and the tag names the cause.
-def reservedTyArgRejected : Bool := progTypeChecks (prog [reservedTyArgDecl]) == false
-#guard expectedRejectionCauses (prog [reservedTyArgDecl]) == ["reserved-name"]
 #guard progTypeChecks (prog [funcDecl, axNamedF0]) == false
 #guard expectedRejectionCauses (prog [funcDecl, axNamedF0]) == ["decl-kind-clash"]
 def varFunctionClashRejected : Bool := progTypeChecks (prog [varFunctionClashDecl]) == false
@@ -925,8 +940,7 @@ def localTypeClashRejected : Bool := progTypeChecks (prog [localTypeClashDecl]) 
 #guard programStatusNote mixed == ""
 #guard programStatusNote Program.init == ""
 def reservedTyArgStatusNote : Bool :=
-  programStatusNote (prog [reservedTyArgDecl]) ==
-    "\n  -- typechecker-rejected, expected: reserved-name"
+  programStatusNote (prog [reservedTyArgDecl]) == ""
 -- Any other rejection, such as two axioms of one name, is unexpected, and the note gives the
 -- checker's message.
 #guard progTypeChecks (prog [axDecl, axDecl]) == false
@@ -989,24 +1003,32 @@ private def polyInoutProcDecl : Decl :=
 def polyInoutProcRetypechecks : Bool :=
   checkProgramTypeCheckIdempotent (prog [polyInoutProcDecl])
 
-/-- Shrinker checks that hold only under a checker that rejects their programs, each paired
-    with its report name. -/
+/-- The shrinker check that holds only under a checker that rejects a datatype block with a
+    reserved tester name, paired with its report name. -/
+def reservedTesterShrinkCheck : String × Bool :=
+  ("shrink: a datatype block with a reserved tester name is rejected",
+    reservedTesterBlockRejected)
+
+/-- The shrinker checks about rejected programs, each paired with its report name. -/
 def strictCheckerShrinkChecks : List (String × Bool) :=
-  [ ("shrink: a datatype block with a reserved tester name is rejected",
-      reservedTesterBlockRejected),
-    ("shrink: a recursive block that clashes with a variable is rejected", clashRecBlockRejected),
+  [ ("shrink: a recursive block that clashes with a variable is rejected", clashRecBlockRejected),
     ("shrink: a precondition naming a non-formal is rejected", precondFuncDanglingRejected),
     ("shrink: a non-recursive function with a measure is rejected", measureFuncRejected),
     ("shrink: a non-recursive function with a measure and no inputs is rejected",
       measureFuncNoInputsRejected),
     ("shrink: unexpected rejections fail the completeness oracle",
       unexpectedRejectionsIncomplete),
-    ("shrink: a reserved type parameter is rejected", reservedTyArgRejected),
     ("shrink: a variable named like a function is rejected", varFunctionClashRejected),
     ("shrink: a local type named like its procedure is rejected", localTypeClashRejected),
-    ("shrink: the status note tags a reserved type parameter", reservedTyArgStatusNote),
     ("shrink: no shrink candidate keeps a measure without a body",
       illTypedShrinkDropsMeasureNoBody) ]
+
+/-- The shrinker checks about a reserved type parameter, which the checker renames and accepts,
+    each paired with its report name. -/
+def renamedTyArgShrinkChecks : List (String × Bool) :=
+  [ ("shrink: a reserved type parameter is renamed", reservedTyArgRenamed),
+    ("shrink: the status note is empty for a reserved type parameter that is renamed",
+      reservedTyArgStatusNote) ]
 
 end Guards
 
