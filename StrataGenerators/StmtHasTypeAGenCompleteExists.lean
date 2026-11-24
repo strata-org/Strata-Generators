@@ -8,8 +8,9 @@ open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
 # Completeness of `genStmt` and `genStmtChain` with an existential size and body-length cap
 
 `spec_complete_at` is stated at a fixed size `n` and a fixed body-length cap `k`, and its side
-conditions `AlphabetOk`, `CallOk` and `ExprOk` mention both. This module states completeness with
-side conditions that mention neither:
+conditions `AlphabetOk`, `CallOk` and `ExprOk` mention both. Its premise `StatementNamesWF` (no
+variable named like a function and no local type named like a declaration of the program) mentions
+neither. This module states completeness with side conditions that mention neither:
 
 * `spec_complete`: a well-typed statement that meets the size-free side conditions is in the support
   of `genStmt … n k` for *some* `n` and `k`.
@@ -470,8 +471,9 @@ end
 -- ── Statement chains at a fixed size and cap ────────────────────────────────
 
 /-- `spec_complete_at` for a statement chain, at a fixed size `n` and cap `k`: each statement of a
-    well-typed chain meets the side conditions, so the chain is in `genStmtChain`'s support at its own
-    length. -/
+    well-typed chain meets the side conditions and `StatementsNamesWF` (no variable named like a
+    function and no local type named like a declaration of `P`), so the chain is in
+    `genStmtChain`'s support at its own length. -/
 theorem spec_complete_chain_at (P : Program) (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     (k : Nat) :
     ∀ (ss : List Statement) (C : LContext CoreLParams) (ts : TypeScopes) (L : List String)
@@ -480,22 +482,23 @@ theorem spec_complete_chain_at (P : Program) (imm : List (Identifier Unit)) (pro
       InGenShapeList ss → WritesOkList imm ss → AlphabetOkList tvars k n ss →
       CallOkList (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx n ss →
       ExprOkList (octx := octx) (tvars := tvars) (pctx := pctx) ctx n ss →
+      StatementsNamesWF P (fun x => x ∈ C.functions) ss →
       ∃ ctx', Strata.Util.HMaps.Equiv ts' (procToTCtx ctx').types ∧ ctx' = stepCtxList ctx ss ∧
         ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
           SPMF.support (genStmtChain (G := SPMF) octx tvars imm procs L C ctx pctx n ss.length k)
-  | [], C, _, _, _, _, hss, ctx, n, hΓ, _, _, _, _, _ => by
+  | [], C, _, _, _, _, hss, ctx, n, hΓ, _, _, _, _, _, _ => by
     cases hss with
     | nil _ _ _ _ hequiv => exact ⟨ctx, hequiv.trans hΓ, rfl, genStmtChain_nil_mem procs C ctx n⟩
   | s :: ss, C, ts, L, C', ts', hss, ctx, n, hΓ, ⟨hnf, hnfs⟩, ⟨hwr, hwrs⟩, ⟨hok, hoks⟩,
-      ⟨hcall, hcalls⟩, ⟨hexpr, hexprs⟩ => by
+      ⟨hcall, hcalls⟩, ⟨hexpr, hexprs⟩, hnm => by
     cases hss with
     | cons _ C₁ _ _ ts₁ _ _ _ _ hs hss =>
       obtain ⟨ctx₁, hctx₁, rfl, hsmem⟩ :=
         spec_complete_at (maxStmtSeqLen := k) P imm procs C ts L s C₁ ts₁ hs ctx n hΓ hnf hwr hok
-          hcall hexpr
+          hcall hexpr hnm.1
       obtain ⟨ctx₂, hctx₂, hstep, hssmem⟩ :=
         spec_complete_chain_at P imm procs k ss C₁ ts₁ L C' ts' hss (stepCtx ctx s) n hctx₁ hnfs hwrs
-          hoks hcalls hexprs
+          hoks hcalls hexprs (statementsNamesWF_tail hs hnm)
       refine ⟨ctx₂, hctx₂, by rw [hstep]; rfl, ?_⟩
       simpa using genStmtChain_cons_mem procs C ctx n ss.length ⟨[s], C₁, stepCtx ctx s⟩ ss C'
         ctx₂ hsmem hssmem
@@ -505,14 +508,17 @@ theorem spec_complete_chain_at (P : Program) (imm : List (Identifier Unit)) (pro
 /-- **Completeness of `genStmtChain`, at every large enough size and cap.** A well-typed chain that
     meets the size-free side conditions is in `genStmtChain`'s support at its own length, at every
     cap `k ≥ K` and every size `n` from some threshold on. This is the form a caller that fixes the
-    size and the cap for other reasons, such as a procedure, uses. -/
+    size and the cap for other reasons, such as a procedure, uses. The chain also meets
+    `StatementsNamesWF`: no variable named like a function of `C` and no local type named like a
+    declaration of `P`. -/
 theorem spec_complete_chain_ev (P : Program) (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     (ss : List Statement) (C : LContext CoreLParams) (ts : TypeScopes) (L : List String)
     (C' : LContext CoreLParams) (ts' : TypeScopes) (hss : StatementsWellTyped P C ts L ss C' ts')
     (ctx : VarCtx) (hΓ : Strata.Util.HMaps.Equiv ts (procToTCtx ctx).types)
     (hshape : InGenShapeList ss) (hwr : WritesOkList imm ss) (hok : AlphabetOkEList tvars ss)
     (hcall : CallOkEList (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx ss)
-    (hexpr : ExprOkEList (octx := octx) (tvars := tvars) (pctx := pctx) ctx ss) :
+    (hexpr : ExprOkEList (octx := octx) (tvars := tvars) (pctx := pctx) ctx ss)
+    (hnames : StatementsNamesWF P (fun x => x ∈ C.functions) ss) :
     ∃ K, Eventually fun n => ∀ k, K ≤ k →
       ∃ ctx', Strata.Util.HMaps.Equiv ts' (procToTCtx ctx').types ∧ ctx' = stepCtxList ctx ss ∧
         ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
@@ -520,14 +526,17 @@ theorem spec_complete_chain_ev (P : Program) (imm : List (Identifier Unit)) (pro
   obtain ⟨K, ha⟩ := alphabetOkEList_eventually ss hok
   exact ⟨K, (ha.and ((callOkEList_eventually imm procs ctx ss hcall).and
     (exprOkEList_eventually ctx ss hexpr))).mono fun n ⟨hA, hC, hE⟩ k hk =>
-      spec_complete_chain_at P imm procs k ss C ts L C' ts' hss ctx n hΓ hshape hwr (hA k hk) hC hE⟩
+      spec_complete_chain_at P imm procs k ss C ts L C' ts' hss ctx n hΓ hshape hwr (hA k hk) hC hE
+        hnames⟩
 
 /-- **Completeness of `genStmt`, for some size and some body-length cap.** Every well-typed
     statement in generator shape (`InGenShape`) that writes no immutable variable (`WritesOk`) and
     whose names, `init` types, call recipes and expressions meet the size-free conditions
     `AlphabetOkE`, `CallOkE` and `ExprOkE` is in the support of `genStmt … n k` for some size `n` and
     some cap `k`, with an output scope equivalent to the typing's. None of the side conditions
-    mentions a size or a cap. -/
+    mentions a size or a cap. The statement also meets
+    `StatementNamesWF`: no variable named like a function of `C` and no local type named like a
+    declaration of `P`, which `ProgramNamesWF` requires of every program. -/
 theorem spec_complete (P : Program) (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (ts : TypeScopes) (labels : List String)
     (s : Statement) (C' : LContext CoreLParams) (ts' : TypeScopes)
@@ -535,7 +544,8 @@ theorem spec_complete (P : Program) (imm : List (Identifier Unit)) (procs : Proc
     (hΓ : Strata.Util.HMaps.Equiv ts (procToTCtx ctx).types)
     (hshape : InGenShape s) (hwr : WritesOk imm s) (hok : AlphabetOkE tvars s)
     (hcall : CallOkE (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx s)
-    (hexpr : ExprOkE (octx := octx) (tvars := tvars) (pctx := pctx) ctx s) :
+    (hexpr : ExprOkE (octx := octx) (tvars := tvars) (pctx := pctx) ctx s)
+    (hnames : StatementNamesWF P (fun x => x ∈ C.functions) s) :
     ∃ k n ctx', Strata.Util.HMaps.Equiv ts' (procToTCtx ctx').types ∧
       ctx' = stepCtx ctx s ∧
       (⟨[s], C', ctx'⟩ : GenStmtResult) ∈
@@ -545,6 +555,6 @@ theorem spec_complete (P : Program) (imm : List (Identifier Unit)) (procs : Proc
     (exprOkE_eventually ctx s hexpr)))
   obtain ⟨hA, hC, hE⟩ := hN N le_rfl
   exact ⟨K, N, spec_complete_at (maxStmtSeqLen := K) P imm procs C ts labels s C' ts' h ctx N hΓ
-    hshape hwr (hA K le_rfl) hC hE⟩
+    hshape hwr (hA K le_rfl) hC hE hnames⟩
 
 end StrataGenerators.Stmt.SpecComplete

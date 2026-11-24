@@ -198,7 +198,7 @@ def genCmdStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
     (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat)
     (pctx : PolyOpCtx := []) : G GenStmtResult := do
-  let r ← genCmd octx tvars immutableVars ctx depth pctx [] C.knownTypes
+  let r ← genCmd octx tvars immutableVars ctx depth pctx (functionNames C) C.knownTypes
   pure ⟨[Stmt.cmd (CmdExt.cmd r.cmd)], C, r.outCtx⟩
 
 /-- Generate an `exit` statement that targets a block around it. The typing rule

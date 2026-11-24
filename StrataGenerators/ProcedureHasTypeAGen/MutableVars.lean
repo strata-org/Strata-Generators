@@ -409,8 +409,8 @@ theorem genStmt_mutableVars
       k ∈ Map.keys (ctx.writable immutableVars) ++ Block.definedVars (P := Expression) r.stmts false) := by
   revert r; show IsSoundFor _ _
   cases n <;> rw [IsSoundFor.iff_obs, genStmt] <;>
-  walk [fun ctx d kt => IsSoundFor.obs
-          (genCmd_mutableVars octx pctx tvars immutableVars ctx d (avoid := []) (kt := kt)),
+  walk [fun ctx d avoid kt => IsSoundFor.obs
+          (genCmd_mutableVars octx pctx tvars immutableVars ctx d (avoid := avoid) (kt := kt)),
         fun d => IsSoundFor.obs (genCallStmt_mutableVars octx pctx tvars immutableVars procs C ctx d),
         fun d => IsSoundFor.obs
           (genCallStmtMatch_mutableVars octx pctx tvars immutableVars procs C ctx d),

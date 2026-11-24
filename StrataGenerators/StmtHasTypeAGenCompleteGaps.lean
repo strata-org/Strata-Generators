@@ -6,11 +6,12 @@ open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
 /-!
 # The side conditions of `spec_complete_at` are necessary
 
-`spec_complete_at` in `StmtHasTypeAGenComplete.lean` carries five side conditions: `InGenShape`,
-`WritesOk`, `AlphabetOk`, `CallOk` and `ExprOk`. This file shows that two of them, `InGenShape` and
-`AlphabetOk`, cannot be removed. For each of the two, it gives a statement that is well-typed under
-`StatementWellTyped` but is not in the support of `genStmt`. Therefore no
-completeness theorem holds for `genStmt` without a side condition of this kind.
+`spec_complete_at` in `StmtHasTypeAGenComplete.lean` carries five side conditions, `InGenShape`,
+`WritesOk`, `AlphabetOk`, `CallOk` and `ExprOk`, and the names premise `StatementNamesWF`. This
+file shows that two of the five, `InGenShape` and `AlphabetOk`, cannot be
+removed. For each of the two, it gives a statement that is well-typed under `StatementWellTyped`
+but is not in the support of `genStmt`. Therefore no completeness theorem holds for `genStmt`
+without a side condition of this kind.
 
 ## The two gaps
 
@@ -132,7 +133,7 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
       SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n maxStmtSeqLen)) :
     (∃ c, ce = CmdExt.cmd c ∧ (⟨c, ctx'⟩ : GenCmdResult) ∈
         SPMF.support
-          (genCmd (G := SPMF) octx tvars immutableVars ctx n [] [] C.knownTypes)) ∨
+          (genCmd (G := SPMF) octx tvars immutableVars ctx n [] (functionNames C) C.knownTypes)) ∨
     (∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr) (mask : List Bool),
         s ∈ procs ∧
         ce = CmdExt.call s.pname
