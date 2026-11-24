@@ -788,7 +788,7 @@ theorem genCallTail_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
   rw [← hMσ] at hNodup hReuse ⊢
   rw [← hOσ] at hTVals
   rw [← hTyArgs]
-  exact call_mixed_body_sound σ s.M s.I s.O T exprs mask hfind hInputs hOutputs
+  exact call_mixed_body_sound σ s.M s.I s.O T exprs mask hσWK hfind hInputs hOutputs
     hExLen hTVals hExTy hIdisjOut hMnotO hNodup hReuse hwk
 
 /-- The soundness of `genCallStmt`, at each depth. Each emitted *group* of a call (the `init`

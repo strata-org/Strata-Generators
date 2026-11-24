@@ -696,7 +696,7 @@ theorem spec_complete_at (P : Program) (imm : List (Identifier Unit)) (procs : P
         genCmdStmt_complete_spec imm procs L C ctx n ts ts' c2 hΓ hcmd hnf hwr hok
           (by simpa [ExprOk] using hexpr)
       exact ⟨ctx', hctx', hstep, hmem⟩
-    | call pname tyArgs callArgs proc md σ _ hfind hwf hlhs hin hout _ hequiv2 =>
+    | call pname tyArgs callArgs proc md σ _ hfind hwf hlhs hin hout _ _ hequiv2 =>
       -- Shape gives `md = default`; `CallOk` gives membership + recipe + guard + empty chain.
       have hmdc : md = default := hnf
       subst hmdc

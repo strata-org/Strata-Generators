@@ -647,8 +647,8 @@ theorem argsMatch_mkArgs {proc : Procedure} (M I O T : @LMonoTySignature Unit)
     `T` positionally as long as `O`, every `M` name and every `T` name in scope at its
     instantiated declared type (`M.values[i]` resp. `O.values[i]`), by-value inputs `exprs` that
     are well-typed at the instantiated input types and are not bare unannotated `fvar`s, and
-    written-to names `M.keys ++ T.keys` that are distinct, the call
-    `CmdExt.call pname (mkArgs M T exprs mask) md` is well-typed and keeps the scopes.
+    written-to names `M.keys ++ T.keys` that are distinct, and a well-kinded instantiation `σ`,
+    the call `CmdExt.call pname (mkArgs M T exprs mask) md` is well-typed and keeps the scopes.
 
     Note the asymmetry between the two written-to blocks, which mirrors the spec:
     the in-out names are `M`'s own (the call rule pins them), whereas the out-only
@@ -660,6 +660,7 @@ theorem call_recipe_inout_sound
     (σ : List (TyIdentifier × LMonoTy))
     (M I O T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
     (mask : List Bool)
+    (hσ : ∀ t ∈ σ.map Prod.snd, C.WellKindedTy t)
     (hfind : Program.Procedure.find? P pname = some proc)
     (hInputs : proc.header.inputs = M ++ I)
     (hOutputs : proc.header.outputs = M ++ O)
@@ -704,7 +705,7 @@ theorem call_recipe_inout_sound
     WF.WFcallProp.of_argsMatch hfind
       (argsMatch_mkArgs M I O T exprs mask hInputs hOutputs hExLen hTLen hInotMO hMnotO)
       (by rw [hgetLhs]; exact hLhsNodup)
-  refine .call ts pname _ (mkArgs M T exprs mask) proc md σ ts hfind hwf ?_ ?_ ?_ rfl
+  refine .call ts pname _ (mkArgs M T exprs mask) proc md σ ts hfind hwf ?_ ?_ ?_ rfl ?_
     (Strata.Util.HMaps.Equiv.refl ts)
   · -- every written-to variable is in scope
     intro v hv
@@ -798,6 +799,16 @@ theorem call_recipe_inout_sound
         rw [hvalsM]
       rw [hlhs, hval]
       exact hTinΓ (i - M.length) hidxKT hidxVO
+  · -- every stored type argument is well kinded
+    intro tys htys ty hty
+    have htysEq := Option.some.inj htys
+    rw [← htysEq] at hty
+    obtain ⟨a, _, rfl⟩ := List.mem_map.mp hty
+    have hvar : C.WellKindedTy (LMonoTy.ftvar a) := by
+      intro ref n hn
+      simp only [getTypeConsArities, List.not_mem_nil] at hn
+    exact subst_wellKinded _
+      (fun v t hfind => hσ t (mem_values_of_find?_ofScopes σ v t hfind)) _ hvar
 
 /-- When out targets `T` carry, position by position, the types of the output signature `O`, and
     the scopes bind every target at its own type, then the scopes bind the target at each position
@@ -866,8 +877,8 @@ theorem cmdExtWellTyped_equiv_congr {C : LContext CoreLParams} {P : Program}
   have hm : ∀ x v, ts.find? x = some v → ts₂.find? x = some v := fun x _ hx => (hf x).trans hx
   cases h with
   | cmd c _ hc => exact .cmd ts₂ c _ (cmdWellTyped_equiv_congr hc he)
-  | call pname tyArgs callArgs proc md σ _ hfind hwf hlhs hargs hlhsTy htyArgs heq =>
-    refine .call ts₂ pname tyArgs callArgs proc md σ _ hfind hwf ?_ ?_ ?_ htyArgs
+  | call pname tyArgs callArgs proc md σ _ hfind hwf hlhs hargs hlhsTy htyArgs hkind heq =>
+    refine .call ts₂ pname tyArgs callArgs proc md σ _ hfind hwf ?_ ?_ ?_ htyArgs hkind
       (heq.trans he.symm)
     · intro v hv
       rw [hf v]
@@ -1046,6 +1057,7 @@ theorem call_mixed_body_sound
     (σ : List (TyIdentifier × LMonoTy))
     (M I O T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
     (mask : List Bool)
+    (hσ : ∀ t ∈ σ.map Prod.snd, C.WellKindedTy t)
     (hfind : Program.Procedure.find? P pname = some proc)
     (hInputs : proc.header.inputs = M ++ I)
     (hOutputs : proc.header.outputs = M ++ O)
@@ -1144,7 +1156,7 @@ theorem call_mixed_body_sound
         (mkArgs M T exprs mask) default) C
       (insertAll ts (missingIn ts (substSig σ M ++ T))) :=
     .cmd C _ L _ _
-      (call_recipe_inout_sound σ M I O T exprs mask hfind hInputs hOutputs hExLen
+      (call_recipe_inout_sound σ M I O T exprs mask hσ hfind hInputs hOutputs hExLen
         (by rw [← lm_values_length T, ← lm_values_length O, hTVals, substSig_values,
               List.length_map])
         hMinΓ hTinΓ (fun i hi hj => exprWellTyped_mono (hExTy i hi hj) hext) hExNoFvar

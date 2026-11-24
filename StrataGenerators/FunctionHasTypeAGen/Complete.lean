@@ -14,21 +14,29 @@ theorem mem_support_genRareFlag (b : Bool) :
   cases b <;> simp
 
 /-- `genFuncAttr depth` reaches every attribute whose parameter index, if any, is at most
-    `depth`. -/
+    `depth` and whose base name, if it is a monomorphization copy, `genIdentName` can produce. -/
 theorem genFuncAttr_complete (depth : Nat) (a : Strata.DL.Util.FuncAttr)
-    (h : ∀ i ∈ attrParamIdx a, i ≤ depth) :
+    (h : ∀ i ∈ attrParamIdx a, i ≤ depth)
+    (hBase : ∀ b, a = .monoCopyOf b → b ∈ SPMF.support (genIdentName (G := SPMF))) :
     a ∈ SPMF.support (genFuncAttr (G := SPMF) depth) := by
   have hzero : 0 ∈ List.range (depth + 1) := List.mem_range.mpr (by omega)
   have hidx : ∀ i, attrParamIdx a = some i → i ∈ List.range (depth + 1) :=
     fun i hi => List.mem_range.mpr (by have hle := h i hi; omega)
-  rw [SPMF.mem_support_iff_may]; unfold genFuncAttr; walk
-  cases a with
-  | inline => exact ⟨0, hzero, by simp⟩
-  | inlineIfConstr i => exact ⟨i, hidx i rfl, by simp⟩
-  | evalIfConstr i => exact ⟨i, hidx i rfl, by simp⟩
-  | evalIfValue i => exact ⟨i, hidx i rfl, by simp⟩
-  | inlineIfAllValues => exact ⟨0, hzero, by simp⟩
-  | shortCircuit => exact ⟨0, hzero, by simp⟩
+  rw [genFuncAttr, mem_support_frequency_iff]
+  by_cases hmono : ∃ b, a = .monoCopyOf b
+  · obtain ⟨b, rfl⟩ := hmono
+    exact ⟨1, fun () => .monoCopyOf <$> genIdentName, by simp, by omega,
+      mem_support_map_iff.mpr ⟨b, hBase b rfl, rfl⟩⟩
+  · refine ⟨6, _, List.mem_cons_self, by omega, ?_⟩
+    rw [SPMF.mem_support_iff_may]; walk
+    cases a with
+    | inline => exact ⟨0, hzero, by simp⟩
+    | inlineIfConstr i => exact ⟨i, hidx i rfl, by simp⟩
+    | evalIfConstr i => exact ⟨i, hidx i rfl, by simp⟩
+    | evalIfValue i => exact ⟨i, hidx i rfl, by simp⟩
+    | inlineIfAllValues => exact ⟨0, hzero, by simp⟩
+    | shortCircuit => exact ⟨0, hzero, by simp⟩
+    | monoCopyOf b => exact absurd ⟨b, rfl⟩ hmono
 
 /-- **Completeness of `genFuncSig`.** It reaches the signature of each function whose type
     arguments are distinct reachable names that all occur in the signature, whose formals have
@@ -147,6 +155,8 @@ theorem genFuncParts_complete (genRecursive : SPMF Bool) (fctx : FVarCtx) (octx 
       ∃ p ∈ datatypeFormals dts func.inputs, m = .fvar genLoc p.1 (some p.2))
     (hAttrLen : func.attr.size ≤ depth)
     (hAttrIdx : ∀ a ∈ func.attr.toList, ∀ i ∈ attrParamIdx a, i ≤ depth)
+    (hAttrBase : ∀ a ∈ func.attr.toList, ∀ b, a = .monoCopyOf b →
+      b ∈ SPMF.support (genIdentName (G := SPMF)))
     (hLemmasLen : func.lemmas.length ≤ depth)
     (hLemmasReach : ∀ s ∈ func.lemmas, s ∈ SPMF.support (genIdentName (G := SPMF))) :
     func ∈ SPMF.support (genFuncParts (G := SPMF) genRecursive fctx octx depth pctx dts
@@ -188,7 +198,7 @@ theorem genFuncParts_complete (genRecursive : SPMF Bool) (fctx : FVarCtx) (octx 
       · exact Or.inr hdt
   · rw [mem_support_listOfMaxLength_iff]
     refine ⟨by rw [Array.length_toList]; exact hAttrLen, fun a ha => ?_⟩
-    exact genFuncAttr_complete depth a (hAttrIdx a ha)
+    exact genFuncAttr_complete depth a (hAttrIdx a ha) (hAttrBase a ha)
 
 /-- **Completeness of `genFunction`.** The support of `genFunction` holds each well-typed
     function whose formals `avoid` does not flag and whose parts the smaller generators reach.
@@ -228,6 +238,8 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat) (pctx
       ∃ p ∈ datatypeFormals dts func.inputs, m = .fvar genLoc p.1 (some p.2))
     (hAttrLen : func.attr.size ≤ depth)
     (hAttrIdx : ∀ a ∈ func.attr.toList, ∀ i ∈ attrParamIdx a, i ≤ depth)
+    (hAttrBase : ∀ a ∈ func.attr.toList, ∀ b, a = .monoCopyOf b →
+      b ∈ SPMF.support (genIdentName (G := SPMF)))
     (hLemmasLen : func.lemmas.length ≤ depth)
     (hLemmasReach : ∀ s ∈ func.lemmas, s ∈ SPMF.support (genIdentName (G := SPMF)))
     (hAvoidInputs : ∀ x ∈ func.inputs.keys, avoid x.name = false) :
@@ -240,6 +252,6 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat) (pctx
       hAvoidInputs,
     genFuncParts_complete genRareFlag fctx octx depth pctx dts C ts func hwt
       (mem_support_genRareFlag _) hBodyReach hPreLen hPreReach hPreMd hAxiomsLen hAxiomsReach
-      hMeasureReach hAttrLen hAttrIdx hLemmasLen hLemmasReach⟩
+      hMeasureReach hAttrLen hAttrIdx hAttrBase hLemmasLen hLemmasReach⟩
 
 end StrataGenerators.Function
