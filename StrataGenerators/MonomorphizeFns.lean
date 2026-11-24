@@ -357,15 +357,8 @@ def monoCreatedCopy (r : (Bool × Program) × Transform.CoreTransformState) : Bo
   (programFuncs r.1.2).any (fun f => (demangleFuncName f.name.name).isSome) ||
     r.2.factory.toArray.any (fun f => (demangleFuncName f.name.name).isSome)
 
-/-- **A second run of the pass is rejected after a run that created a copy, and it changes nothing
-    otherwise.** The pass rejects an input that names a function `$__mono#…`, so it runs at most
-    once per pipeline. If the first run created a specialized copy, the second run must raise a
-    diagnostic. If it created none, the second run must give the same program and report
-    `changed = false`.
-
-    The second run starts from the state of the *first* run, and not from a fresh state. A second
-    seed of `Core.Factory` would give the second run the polymorphic originals of the factory that
-    the first run dropped, and the property would measure this module and not the pass. -/
+/-- After a first run that created a `$__mono#` copy, a second run is rejected. Otherwise the
+    second run returns the same program unchanged. -/
 abbrev checkMonoSecondRun (p : Program) : Prop :=
   ∀ r ∈ runMono p,
     runMonoAgain r = if monoCreatedCopy r then none else some (false, r.1.2)

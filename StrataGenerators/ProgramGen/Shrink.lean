@@ -1010,7 +1010,7 @@ def reservedTesterShrinkCheck : String × Bool :=
     reservedTesterBlockRejected)
 
 /-- The shrinker checks about rejected programs, each paired with its report name. -/
-def strictCheckerShrinkChecks : List (String × Bool) :=
+def rejectedProgramShrinkChecks : List (String × Bool) :=
   [ ("shrink: a recursive block that clashes with a variable is rejected", clashRecBlockRejected),
     ("shrink: a precondition naming a non-formal is rejected", precondFuncDanglingRejected),
     ("shrink: a non-recursive function with a measure is rejected", measureFuncRejected),

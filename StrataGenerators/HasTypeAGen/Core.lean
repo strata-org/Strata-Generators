@@ -37,9 +37,8 @@ open Lambda RandomChoice ArbNat ArbChar ArbString
 
 -- ── Parameter types ──────────────────────────────────────────────────
 
-/-- The location carried by every expression node the generators build. It is Core's own
-    location for synthesized expressions, so a node built here agrees with the nodes that Core
-    operations such as `HasFvar.mkFvar` build. -/
+/-- The location of every generated expression node: Core's location for synthesized nodes
+    (`Core.coreLoc`). -/
 abbrev genLoc : ExprSourceLoc := Core.coreLoc
 
 /-- The base `LExprParams` of this package: Core's source-location metadata and unit

@@ -71,7 +71,7 @@ def programADTProps : List TestDecl :=
     name needs a checker stricter than Core's `Program.typeCheck`. -/
 @[strata_properties]
 def programShrinkChecks : List TestDecl :=
-  (strictCheckerShrinkChecks ++ renamedTyArgShrinkChecks).map (fun (name, verdict) =>
+  (rejectedProgramShrinkChecks ++ renamedTyArgShrinkChecks).map (fun (name, verdict) =>
     TestDecl.witness name verdict) ++
   [ knownFailure "needs a checker that rejects this program; Core's `Program.typeCheck` \
       accepts it" (TestDecl.witness reservedTesterShrinkCheck.1 reservedTesterShrinkCheck.2) ]

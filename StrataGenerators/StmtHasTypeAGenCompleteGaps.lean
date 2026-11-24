@@ -73,7 +73,7 @@ variable {maxStmtSeqLen : Nat}
 /-- A one-statement call group has an empty `init` chain. Then the statement is
     the call itself. -/
 theorem initChain_append_call_singleton {L : List (Identifier Unit × LMonoTy)}
-    {pn : String} {tys : Option (List Expression.Ty)} {args : List (CallArg Expression)}
+    {pn : String} {tys : Option (List LTy)} {args : List (CallArg Expression)}
     {md : Imperative.MetaData Expression} {s : Statement}
     (h : [s] = StrataGenerators.Stmt.initChain L ++ [Statement.call pn tys args md]) :
     s = Statement.call pn tys args md := by
