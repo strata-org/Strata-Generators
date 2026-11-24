@@ -310,7 +310,7 @@ theorem genCallStmtMatch_count (octx : OpCtx) (tvars : List TyIdentifier)
     (hr : r ∈ support
       (genCallStmtMatch (G := SPMF) octx tvars immutableVars procs C ctx depth pctx)) :
     nestCountL c r.stmts = 0 := by
-  obtain ⟨_, _, _, _, _, _, _, _, hr⟩ := genCallStmtMatch_cases r hr
+  obtain ⟨_, _, _, _, _, _, _, _, _, _, hr⟩ := genCallStmtMatch_cases r hr
   exact genCallTail_count c (hr := hr)
 
 end Leaves

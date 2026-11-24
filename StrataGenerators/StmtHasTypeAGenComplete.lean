@@ -280,10 +280,8 @@ def CallOk (imm : List (Identifier Unit)) (procs : ProcSigCtx) (ctx : VarCtx) (n
         s.pname = pname ∧
         σvals ∈ SPMF.support
           (s.typeArgs.mapM (fun _ =>
-            if hg : (generableTypesFromCtx ctx.values [] octx).length > 0 then
-              elements (generableTypesFromCtx ctx.values [] octx)
-                (by apply List.ne_nil_of_length_pos; assumption)
-            else pure (.bool : LMonoTy)) : SPMF (List LMonoTy)) ∧
+            sampleTyArg tvars (generableTypesFromCtx ctx.values [] octx)) :
+            SPMF (List LMonoTy)) ∧
         args = StrataGenerators.Stmt.mkArgs s.M
           (outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
           exprs mask ∧

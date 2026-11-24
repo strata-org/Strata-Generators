@@ -425,8 +425,23 @@ def declWritesReservedType : Decl → Bool
     !block.all (·.constrs.all (·.args.all (mtyAllTyConsNames isAllowedName ·.2)))
   | .type (.con _) _ => false
 
+/-- Whether a procedure of `P` calls a procedure that has a type parameter occurring in none of
+    its input and output types. The checker cannot determine such a parameter at the call. -/
+def hasUndeterminedCallTyArg (P : Program) : Bool :=
+  P.decls.any fun
+    | .proc p _ => (bodyCmds p.body).any fun
+      | .call callee _ _ _ =>
+        match Program.Procedure.find? P callee with
+        | some q =>
+          let sigVars := LMonoTys.freeVars (q.header.inputs.values ++ q.header.outputs.values)
+          q.header.typeArgs.any (fun a => !sigVars.contains a)
+        | none => false
+      | .cmd _ => false
+    | _ => false
+
 /-- The reasons the checker may reject `P` that the typing spec allows, as tags: a reserved
-    name (one `Lambda.isAllowedName` refuses) or a clash between names of different kinds. -/
+    name (one `Lambda.isAllowedName` refuses), a clash between names of different kinds, or a call
+    that leaves a type parameter of the callee undetermined. -/
 def expectedRejectionCauses (P : Program) : List String :=
   (if P.decls.any (fun d => (declBoundNames d).any (!Lambda.isAllowedName ·)
       || declWritesReservedType d) then
@@ -434,9 +449,11 @@ def expectedRejectionCauses (P : Program) : List String :=
     ++ (if hasDeclKindClash P then ["decl-kind-clash"] else [])
     ++ (if hasVarFunctionClash P then ["var-function-clash"] else [])
     ++ (if hasLocalTypeClash P then ["local-type-clash"] else [])
+    ++ (if hasUndeterminedCallTyArg P then ["undetermined-call-tyarg"] else [])
 
-/-- Whether a checker rejection of `P` is expected: `P` has a reserved name or a clash between
-    names of different kinds. Every other rejection of a generated program is a failure. -/
+/-- Whether a checker rejection of `P` is expected: `P` has a reserved name, a clash between names
+    of different kinds, or a call that leaves a type parameter undetermined. Every other rejection
+    of a generated program is a failure. -/
 def checkerRejectionExpected (P : Program) : Bool := !(expectedRejectionCauses P).isEmpty
 
 -- ── The six `Bool` check predicates ──────────────────────────────────────

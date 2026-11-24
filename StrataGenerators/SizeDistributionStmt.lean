@@ -122,7 +122,7 @@ theorem genCallStmtMatch_flat :
     IsSoundFor (genCallStmtMatch (G := SPMF) octx tvars imm procs C ctx d pctx)
       (fun r => ¬ HasNesting r) := by
   intro r hr
-  obtain ⟨_, _, _, _, _, _, _, _, hr⟩ := genCallStmtMatch_cases r hr
+  obtain ⟨_, _, _, _, _, _, _, _, _, _, hr⟩ := genCallStmtMatch_cases r hr
   exact genCallTail_flat (hr := hr)
 
 end leaves

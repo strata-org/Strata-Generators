@@ -375,7 +375,7 @@ theorem genCallStmtMatch_mutableVars
     (∀ k ∈ Map.keys (r.outCtx.writable immutableVars),
       k ∈ Map.keys (ctx.writable immutableVars) ++
         Block.definedVars (P := Expression) r.stmts false) := by
-  obtain ⟨_, chosen, _, _, _, hcand, _, _, hr⟩ :=
+  obtain ⟨_, chosen, _, _, _, hcand, _, _, _, _, hr⟩ :=
     genCallStmtMatch_cases (octx := octx) (tvars := tvars) (pctx := pctx) r hr
   exact genCallTail_mutableVars octx pctx tvars immutableVars C ctx n _ _ _
     (matchOutTargets_not_immutable ctx _ (maxNameLen_le_outNameBase ctx _) _ chosen

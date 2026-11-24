@@ -1,4 +1,5 @@
 import StrataGenerators.StmtHasTypeAGenComplete
+import Strata.Languages.Core.ProcedureProps
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec ArbString
 open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
@@ -296,6 +297,117 @@ theorem exprOkEList_eventually : ∀ (ctx : VarCtx) (ss : List Statement),
     (exprOkE_eventually ctx s hs).and (exprOkEList_eventually (stepCtx ctx s) ss hss)
 end
 
+-- ── The sampler clause of a call follows from the typing of the procedure ───
+
+/-- A list of types that each come from `gt` (or are `bool` when `gt` is empty) and have their type
+    variables in `tvars` is a draw of one `sampleTyArg tvars gt` for each type parameter. -/
+theorem mem_support_mapM_sampleTyArg (typeArgs : List TyIdentifier) (gt : List LMonoTy) :
+    ∀ σvals : List LMonoTy, σvals.length = typeArgs.length →
+      (∀ t ∈ σvals, t ∈ gt ∨ (gt = [] ∧ t = .bool)) →
+      (∀ t ∈ σvals, tyVarsWithin tvars t = true) →
+      σvals ∈ SPMF.support
+        (typeArgs.mapM (fun _ => sampleTyArg tvars gt) : SPMF (List LMonoTy)) := by
+  have hone : ∀ t, (t ∈ gt ∨ (gt = [] ∧ t = .bool)) → tyVarsWithin tvars t = true →
+      t ∈ SPMF.support (sampleTyArg (G := SPMF) tvars gt) := by
+    intro t hgen hb
+    unfold sampleTyArg
+    dsimp only
+    split
+    · rename_i hpos
+      rw [mem_support_elements_iff]
+      rcases hgen with hin | ⟨hnil, _⟩
+      · exact List.mem_filter.mpr ⟨hin, hb⟩
+      · subst hnil
+        simp only [List.filter_nil, List.length_nil, gt_iff_lt, lt_self_iff_false] at hpos
+    · rename_i hneg
+      rw [mem_support_pure_iff]
+      rcases hgen with hin | ⟨_, hbool⟩
+      · exact absurd (List.length_pos_of_mem (List.mem_filter.mpr ⟨hin, hb⟩)) hneg
+      · exact hbool
+  induction typeArgs with
+  | nil =>
+    intro σvals hlen _ _
+    cases σvals with
+    | nil => simp only [List.mapM_nil, mem_support_pure_iff]
+    | cons _ _ => simp only [List.length_cons, List.length_nil] at hlen; omega
+  | cons a rest ih =>
+    intro σvals hlen hgen hb
+    cases σvals with
+    | nil => simp only [List.length_nil, List.length_cons] at hlen; omega
+    | cons t ts =>
+      rw [mem_support_mapM_iff]
+      refine List.Forall₂.cons (hone t (hgen t List.mem_cons_self) (hb t List.mem_cons_self)) ?_
+      rw [← mem_support_mapM_iff]
+      have hlen' : ts.length = rest.length := by
+        simp only [List.length_cons, Nat.add_right_cancel_iff] at hlen
+        exact hlen
+      exact ih ts hlen'
+        (fun u hu => hgen u (List.mem_cons_of_mem _ hu))
+        (fun u hu => hb u (List.mem_cons_of_mem _ hu))
+
+/-- When the callee's type parameters are distinct, each instantiation value of a call is a type
+    argument that the call stores, so a bound on the stored type arguments bounds the values. -/
+theorem call_instantiation_tyVarsWithin (calleeTypeArgs : List TyIdentifier)
+    (σvals : List LMonoTy) (hnd : calleeTypeArgs.Nodup)
+    (hlen : σvals.length = calleeTypeArgs.length) {pname : String}
+    {args : List (CallArg Expression)} {md : Imperative.MetaData Expression}
+    (hbound : ∀ v ∈ cmdCollect (fun _ => []) LMonoTy.freeVars
+      (CmdExt.call pname (callTyArgs calleeTypeArgs (calleeTypeArgs.zip σvals)) args md),
+      v ∈ tvars) :
+    ∀ t ∈ σvals, tyVarsWithin tvars t = true := by
+  intro t ht
+  have hsnd : (calleeTypeArgs.zip σvals).map Prod.snd = σvals :=
+    List.map_snd_zip (Nat.le_of_eq hlen)
+  have htmem : t ∈ (calleeTypeArgs.zip σvals).map Prod.snd := by
+    rw [hsnd]
+    exact ht
+  obtain ⟨⟨a, t'⟩, haz, hsnd'⟩ := List.mem_map.mp htmem
+  have hteq : t = t' := hsnd'.symm
+  subst hteq
+  have hfind : Strata.Util.HMaps.find?
+      (Strata.Util.HMaps.ofScopes [calleeTypeArgs.zip σvals]) a = some t :=
+    Subst.find?_ofZip_of_mem_zip hnd haz
+  have hsubst : LMonoTy.subst (Strata.Util.HMaps.ofScopes [calleeTypeArgs.zip σvals])
+      (.ftvar a) = t := by
+    rw [LMonoTy.subst_unfold]
+    dsimp only
+    rw [hfind]
+  unfold tyVarsWithin
+  refine List.all_eq_true.mpr fun v hv => List.contains_iff_mem.mpr (hbound v ?_)
+  simp only [cmdCollect, CmdExt.initTypes, Statement.cmdTyArgs, Statement.cmdExprs,
+    List.flatMap_nil, List.nil_append, flatMap_const_nil, List.append_nil, callTyArgs,
+    Option.getD_some, List.mem_flatMap, List.mem_map]
+  have hvt : v ∈ (LMonoTy.subst (Strata.Util.HMaps.ofScopes [calleeTypeArgs.zip σvals])
+      (.ftvar a)).freeVars := by
+    rw [hsubst]
+    exact hv
+  exact ⟨_, ⟨a, (List.of_mem_zip haz).1, rfl⟩, hvt⟩
+
+/-- A call in the body of a well-typed procedure whose instantiation values are generable (drawn
+    from `gt`, or `bool` when `gt` is empty) meets the sampler clause over its type parameters. -/
+theorem call_sampler_of_procWellTyped {P : Program} {C : LContext CoreLParams} {ts : TypeScopes}
+    {proc : Procedure} (hproc : ProcWellTyped P C ts proc) {ss : List Statement}
+    (hbody : proc.body = .structured ss) (calleeTypeArgs : List TyIdentifier)
+    (σvals : List LMonoTy) (gt : List LMonoTy) (hnd : calleeTypeArgs.Nodup)
+    (hlen : σvals.length = calleeTypeArgs.length) {pname : String}
+    {args : List (CallArg Expression)} {md : Imperative.MetaData Expression}
+    (hcall : CmdExt.call pname (callTyArgs calleeTypeArgs (calleeTypeArgs.zip σvals)) args md ∈
+      stmtsCmds ss)
+    (hgen : ∀ t ∈ σvals, t ∈ gt ∨ (gt = [] ∧ t = .bool)) :
+    σvals ∈ SPMF.support
+      (calleeTypeArgs.mapM (fun _ => sampleTyArg proc.header.typeArgs gt) :
+        SPMF (List LMonoTy)) := by
+  have hbound : ∀ v ∈ cmdCollect (fun _ => []) LMonoTy.freeVars
+      (CmdExt.call pname (callTyArgs calleeTypeArgs (calleeTypeArgs.zip σvals)) args md),
+      v ∈ proc.header.typeArgs := by
+    intro v hv
+    refine hproc.declTyVarsBound v ?_
+    rw [Procedure.bodyCollect_noExprs_eq_cmds, hbody, List.mem_flatMap]
+    exact ⟨_, hcall, hv⟩
+  have hvars := call_instantiation_tyVarsWithin (tvars := proc.header.typeArgs) calleeTypeArgs
+    σvals hnd hlen hbound
+  exact mem_support_mapM_sampleTyArg calleeTypeArgs gt σvals hlen hgen hvars
+
 -- ── The size-free call condition ────────────────────────────────────────────
 
 mutual
@@ -309,10 +421,8 @@ def CallOkE (imm : List (Identifier Unit)) (procs : ProcSigCtx) (ctx : VarCtx) :
         s.pname = pname ∧
         σvals ∈ SPMF.support
           (s.typeArgs.mapM (fun _ =>
-            if hg : (generableTypesFromCtx ctx.values [] octx).length > 0 then
-              elements (generableTypesFromCtx ctx.values [] octx)
-                (by apply List.ne_nil_of_length_pos; assumption)
-            else pure (.bool : LMonoTy)) : SPMF (List LMonoTy)) ∧
+            sampleTyArg tvars (generableTypesFromCtx ctx.values [] octx)) :
+            SPMF (List LMonoTy)) ∧
         args = StrataGenerators.Stmt.mkArgs s.M
           (outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
           exprs mask ∧

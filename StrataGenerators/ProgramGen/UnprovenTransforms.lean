@@ -2227,16 +2227,16 @@ private def preconditionSatisfiedProgram : Program :=
       of the precondition only. After the pass, the list of the obligations is empty, so the one proof
       obligation of the program is gone, and not one of several.
     * Nothing in it is contrived. The generator drew a beta redex for the precondition, five parameters
-      of assorted types, two type parameters, and a procedure whose name is `$`. A reader can reply to a
-      witness that a person wrote that no real program has that shape. This witness is what the generator
-      gave. -/
+      of assorted types, three type parameters, and a procedure whose name is `$`. A reader can
+      reply to a witness that a person wrote that no real program has that shape. This witness is
+      what the generator gave. -/
 private def generatedRequiresWitness : Program :=
   let preExpr : Expression.Expr :=
     .app genLoc
       (.abs genLoc "__q0" (some (.bitvec 64)) (.const genLoc (.boolConst true)))
       (.const genLoc (.bitvecConst 64 5065526758814335903))
   { decls :=
-      [ .proc { header := { name := ⟨"Mj", ()⟩, typeArgs := ["P", "jvB"],
+      [ .proc { header := { name := ⟨"Mj", ()⟩, typeArgs := [],
                             inputs := [(⟨"xB", ()⟩, .string), (⟨"sRw", ()⟩, .real),
                                        (⟨"w", ()⟩, .real)],
                             outputs := [(⟨"xB", ()⟩, .string), (⟨"sRw", ()⟩, .real),

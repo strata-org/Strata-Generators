@@ -928,6 +928,32 @@ def varFunctionClashRejected : Bool := progTypeChecks (prog [varFunctionClashDec
 #guard expectedRejectionCauses (prog [varFunctionClashDecl]) == ["var-function-clash"]
 def localTypeClashRejected : Bool := progTypeChecks (prog [localTypeClashDecl]) == false
 #guard expectedRejectionCauses (prog [localTypeClashDecl]) == ["local-type-clash"]
+/-- A procedure `Q0<a>(x : int)` whose type parameter occurs in none of its input and output types,
+    and a procedure `P4` that calls it. -/
+private def undeterminedCallDecls : List Decl :=
+  [ .proc { header := { name := ⟨"Q0", ()⟩, typeArgs := ["a"], inputs := [(⟨"x", ()⟩, .int)],
+                        outputs := [], lemmas := [] }
+            spec := { preconditions := [], postconditions := [] }
+            body := .structured [] } .empty,
+    procWithBody "P4"
+      [.call "Q0" (some []) [.inArg (.const genLoc (.intConst 0))] .empty] ]
+
+/-- A procedure `Q1<a>(x : a)` whose type parameter is the type of its input, and a procedure `P5`
+    that calls it with an integer. -/
+private def determinedCallDecls : List Decl :=
+  [ .proc { header := { name := ⟨"Q1", ()⟩, typeArgs := ["a"], inputs := [(⟨"x", ()⟩, .ftvar "a")],
+                        outputs := [], lemmas := [] }
+            spec := { preconditions := [], postconditions := [] }
+            body := .structured [] } .empty,
+    procWithBody "P5"
+      [.call "Q1" (some []) [.inArg (.const genLoc (.intConst 0))] .empty] ]
+
+-- The checker rejects a call that leaves a type parameter of its callee undetermined, and the
+-- oracle tags the cause. A call whose arguments determine the parameter is accepted, with no tag.
+#guard progTypeChecks (prog undeterminedCallDecls) == false
+#guard expectedRejectionCauses (prog undeterminedCallDecls) == ["undetermined-call-tyarg"]
+#guard progTypeChecks (prog determinedCallDecls) == true
+#guard expectedRejectionCauses (prog determinedCallDecls) == []
 -- A variable named like a function that is declared only later is accepted, and no cause fires.
 #guard progTypeChecks
   (prog [procWithBody "P3" [.init "f0" (.forAll [] .int) .nondet .empty], funcDecl]) == true

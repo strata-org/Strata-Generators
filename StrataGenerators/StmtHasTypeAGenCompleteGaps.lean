@@ -115,7 +115,7 @@ theorem genCallStmtMatch_cmd_inv (immutableVars : List (Identifier Unit)) (procs
         ce = CmdExt.call s.pname
           (callTyArgs s.typeArgs (s.typeArgs.zip σvals))
           (StrataGenerators.Stmt.mkArgs s.M targets exprs mask) default := by
-  obtain ⟨s, _, σvals, hs, _, _, _, _, hr⟩ := genCallStmtMatch_cases r hr
+  obtain ⟨s, _, σvals, hs, _, _, _, _, _, _, hr⟩ := genCallStmtMatch_cases r hr
   obtain ⟨exprs, mask, hce⟩ := genCallTail_cmd_inv hr heq
   exact ⟨s, _, σvals, exprs, mask, hs, hce⟩
 

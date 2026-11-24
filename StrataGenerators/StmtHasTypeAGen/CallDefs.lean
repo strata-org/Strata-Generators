@@ -205,6 +205,13 @@ def mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
 def initChain (news : List (Identifier Unit × LMonoTy)) : List Statement :=
   news.map (fun p => Statement.init p.1 (.forAll [] p.2) .nondet default)
 
+/-- The commands of a concatenation are the commands of its parts. -/
+theorem stmtsCmds_append (xs ys : List Statement) :
+    stmtsCmds (xs ++ ys) = stmtsCmds xs ++ stmtsCmds ys := by
+  induction xs with
+  | nil => rfl
+  | cons s rest ih => simp only [List.cons_append, stmtsCmds, ih, List.append_assoc]
+
 /-- The flat `VarCtx` analogue of `insertAll`: the *generator-side* scope after running
     `initChain news` in the ambient scope. Because the chain is emitted **inline** (not inside a block), these
     declarations genuinely escape into the enclosing sequence. Therefore this definition, and not
