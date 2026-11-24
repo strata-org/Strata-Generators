@@ -6,11 +6,12 @@ open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
 /-!
 # The side conditions of `spec_complete_at` are necessary
 
-`spec_complete_at` in `StmtHasTypeAGenComplete.lean` carries five side conditions: `InGenShape`,
-`WritesOk`, `AlphabetOk`, `CallOk` and `ExprOk`. This file shows that two of them, `InGenShape` and
-`AlphabetOk`, cannot be removed. For each of the two, it gives a statement that is well-typed under
-`StatementWellTyped` but is not in the support of `genStmt`. Therefore no
-completeness theorem holds for `genStmt` without a side condition of this kind.
+`spec_complete_at` in `StmtHasTypeAGenComplete.lean` carries five side conditions, `InGenShape`,
+`WritesOk`, `AlphabetOk`, `CallOk` and `ExprOk`, and the names premise `StatementNamesWF`. This
+file shows that two of the five, `InGenShape` and `AlphabetOk`, cannot be
+removed. For each of the two, it gives a statement that is well-typed under `StatementWellTyped`
+but is not in the support of `genStmt`. Therefore no completeness theorem holds for `genStmt`
+without a side condition of this kind.
 
 ## The two gaps
 
@@ -73,10 +74,10 @@ variable {maxStmtSeqLen : Nat}
 /-- A one-statement call group has an empty `init` chain. Then the statement is
     the call itself. -/
 theorem initChain_append_call_singleton {L : List (Identifier Unit × LMonoTy)}
-    {pn : String} {args : List (CallArg Expression)} {md : Imperative.MetaData Expression}
-    {s : Statement}
-    (h : [s] = StrataGenerators.Stmt.initChain L ++ [Statement.call pn args md]) :
-    s = Statement.call pn args md := by
+    {pn : String} {tys : Option (List LTy)} {args : List (CallArg Expression)}
+    {md : Imperative.MetaData Expression} {s : Statement}
+    (h : [s] = StrataGenerators.Stmt.initChain L ++ [Statement.call pn tys args md]) :
+    s = Statement.call pn tys args md := by
   cases L with
   | nil => simpa [StrataGenerators.Stmt.initChain] using h
   | cons hd tl => simp [StrataGenerators.Stmt.initChain] at h
@@ -92,7 +93,9 @@ theorem genCallTail_cmd_inv {C : LContext CoreLParams} {ctx : VarCtx} {n : Nat} 
       (genCallTail (G := SPMF) octx tvars immutableVars C ctx n pctx s σ T))
     (heq : r = ⟨[Stmt.cmd ce], C', ctx'⟩) :
     ∃ (exprs : List Expression.Expr) (mask : List Bool),
-      ce = CmdExt.call s.pname (StrataGenerators.Stmt.mkArgs s.M T exprs mask) default := by
+      ce = CmdExt.call s.pname
+        (callTyArgs s.typeArgs σ)
+        (StrataGenerators.Stmt.mkArgs s.M T exprs mask) default := by
   obtain ⟨_, exprs, mask, _, _, rfl⟩ := genCallTail_support hr
   simp only [GenStmtResult.mk.injEq] at heq
   have hcall := initChain_append_call_singleton heq.1.symm
@@ -107,14 +110,15 @@ theorem genCallStmtMatch_cmd_inv (immutableVars : List (Identifier Unit)) (procs
     (hr : r ∈ SPMF.support
       (genCallStmtMatch (G := SPMF) octx tvars immutableVars procs C ctx n []))
     (heq : r = ⟨[Stmt.cmd ce], C', ctx'⟩) :
-    ∃ (s : ProcSig) (targets : @LMonoTySignature Unit) (exprs : List Expression.Expr)
-        (mask : List Bool),
+    ∃ (s : ProcSig) (targets : @LMonoTySignature Unit) (σvals : List LMonoTy)
+        (exprs : List Expression.Expr) (mask : List Bool),
         s ∈ procs ∧
         ce = CmdExt.call s.pname
+          (callTyArgs s.typeArgs (s.typeArgs.zip σvals))
           (StrataGenerators.Stmt.mkArgs s.M targets exprs mask) default := by
-  obtain ⟨s, _, _, hs, _, _, _, _, hr⟩ := genCallStmtMatch_cases r hr
+  obtain ⟨s, _, σvals, hs, _, _, _, _, _, _, hr⟩ := genCallStmtMatch_cases r hr
   obtain ⟨exprs, mask, hce⟩ := genCallTail_cmd_inv hr heq
-  exact ⟨s, _, exprs, mask, hs, hce⟩
+  exact ⟨s, _, σvals, exprs, mask, hs, hce⟩
 
 /-- **Inversion at a `.cmd` group.** `genStmt` reaches a one-statement group
     `[.cmd ce]` in exactly three ways. Either `genCmd` produced an imperative
@@ -129,18 +133,20 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
       SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n maxStmtSeqLen)) :
     (∃ c, ce = CmdExt.cmd c ∧ (⟨c, ctx'⟩ : GenCmdResult) ∈
         SPMF.support
-          (genCmd (G := SPMF) octx tvars immutableVars ctx n [] [] C.knownTypes)) ∨
+          (genCmd (G := SPMF) octx tvars immutableVars ctx n [] (functionNames C) C.knownTypes)) ∨
     (∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr) (mask : List Bool),
         s ∈ procs ∧
         ce = CmdExt.call s.pname
+          (callTyArgs s.typeArgs (s.typeArgs.zip σvals))
           (StrataGenerators.Stmt.mkArgs s.M
             (outTargets immutableVars ctx
               (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O) (functionNames C))
             exprs mask) default) ∨
-    (∃ (s : ProcSig) (targets : @LMonoTySignature Unit) (exprs : List Expression.Expr)
-        (mask : List Bool),
+    (∃ (s : ProcSig) (targets : @LMonoTySignature Unit) (σvals : List LMonoTy)
+        (exprs : List Expression.Expr) (mask : List Bool),
         s ∈ procs ∧
         ce = CmdExt.call s.pname
+          (callTyArgs s.typeArgs (s.typeArgs.zip σvals))
           (StrataGenerators.Stmt.mkArgs s.M targets exprs mask) default) := by
   refine (?_ : IsSoundFor _ (fun (r : GenStmtResult) => r = ⟨[Stmt.cmd ce], C', ctx'⟩ → _)) _ h rfl
   rw [IsSoundFor.iff_obs]
@@ -222,7 +228,7 @@ theorem metadata_gap (immutableVars : List (Identifier Unit)) (procs : ProcSigCt
       SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n maxStmtSeqLen) := by
   intro h
   rcases mem_genStmt_cmd_inv immutableVars procs labels C C' ctx ctx' n _ h with
-    ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, _, hce⟩ | ⟨s, targets, exprs, mask, _, hce⟩
+    ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, _, hce⟩ | ⟨s, targets, σvals, exprs, mask, _, hce⟩
   · rw [CmdExt.cmd.injEq] at hce; subst hce
     exact hmd (mem_genCmd_assert_inv immutableVars ctx ctx' n l e md hc).1
   · exact absurd hce (by simp)
@@ -261,7 +267,7 @@ theorem label_gap (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
       SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n maxStmtSeqLen) := by
   intro h
   rcases mem_genStmt_cmd_inv immutableVars procs labels C C' ctx ctx' n _ h with
-    ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, _, hce⟩ | ⟨s, targets, exprs, mask, _, hce⟩
+    ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, _, hce⟩ | ⟨s, targets, σvals, exprs, mask, _, hce⟩
   · rw [CmdExt.cmd.injEq] at hce; subst hce
     exact hl (mem_genCmd_assert_inv immutableVars ctx ctx' n l e default hc).2
   · exact absurd hce (by simp)
@@ -327,7 +333,7 @@ obstruction alone is enough, and that is why an existential in place of the `∀
 theorem not_GenLExprComplete (d : Nat) :
     ¬ GenLExprComplete [] octx tvars d := by
   intro h
-  have hmem := h .int (LExpr.fvar () ⟨"zzz", ()⟩ (some .int)) HasTypeA.fvar
+  have hmem := h .int (LExpr.fvar genLoc ⟨"zzz", ()⟩ (some .int)) HasTypeA.fvar
   have := Lambda.LExpr.genLExpr_no_fvars octx [] tvars [] d .int _ hmem
   simp [LExpr.getVars] at this
 
@@ -363,8 +369,8 @@ def callerCtx : VarCtx := [(⟨"r", ()⟩, .int), (⟨"z", ()⟩, .int)]
 /-- The call `call p(1, out z);`, which receives the result in `z` and not in the variable `r` that
     the callee declares. -/
 def otherTargetCall : Statement :=
-  Statement.call "p"
-    [CallArg.inArg (LExpr.const () (.intConst 1)), CallArg.outArg ⟨"z", ()⟩] default
+  Statement.call "p" (some [])
+    [CallArg.inArg (LExpr.const genLoc (.intConst 1)), CallArg.outArg ⟨"z", ()⟩] default
 
 /-- The call `call p(1, out z);` is in the support of `genCallStmtMatch`, at some depth, when no
     function of the context is named `z`. The generator draws `z` as the target of the one
@@ -375,9 +381,10 @@ theorem otherTargetCall_mem_genCallStmtMatch (C : LContext CoreLParams) (pctx : 
     (hz : "z" ∉ functionNames C) :
     ∃ d, (⟨[otherTargetCall], C, callerCtx⟩ : GenStmtResult) ∈
       SPMF.support (genCallStmtMatch (G := SPMF) octx tvars [] [sigP] C callerCtx d pctx) := by
-  have hone : ∃ d, (LExpr.const () (.intConst 1) : LExpr') ∈ SPMF.support
+  have hone : ∃ d, (LExpr.const genLoc (.intConst 1) : LExpr') ∈ SPMF.support
       (genLExpr (G := SPMF) callerCtx.toFVarCtx octx pctx tvars [] d .int) :=
-    genLExpr_complete_exists _ _ _ _ _ _ genLMonoTy_mem_int _ _ (by exact .const) trivial trivial
+    genLExpr_complete_exists _ _ _ _ _ _ genLMonoTy_mem_int _ _ (by exact .const rfl)
+      trivial trivial
       ⟨0, .intConst⟩
   obtain ⟨d, hd⟩ := hone
   refine ⟨d, ?_⟩
@@ -426,12 +433,12 @@ theorem otherTargetCall_mem_genCallStmtMatch (C : LContext CoreLParams) (pctx : 
     have hMnotFn : ((StrataGenerators.Stmt.substSig [] sigP.M).filter (needsInit callerCtx)).all
         (fun q => !(functionNames C).contains q.1.name) = true := by
       simp [sigP, StrataGenerators.Stmt.substSig]
-    have hannots : ([LExpr.const () (.intConst 1)] : List LExpr').all
+    have hannots : ([LExpr.const genLoc (.intConst 1)] : List LExpr').all
         (binderAnnotsKnownIn C.knownTypes) = true := by
       simp [binderAnnotsKnownIn, LExpr.binderAnnotations]
     exact genCallTail_mem (octx := octx) (tvars := tvars) (immutableVars := [])
       (pctx := pctx) (C := C) (ctx := callerCtx) (d := d) (s := sigP) (σ := [])
       (T := [(⟨"z", ()⟩, LMonoTy.int)]) hMusable hNodup hMnotFn
-      [LExpr.const () (.intConst 1)] [true] (.cons hd .nil) hannots
+      [LExpr.const genLoc (.intConst 1)] [true] (.cons hd .nil) hannots
 
 end StrataGenerators.Stmt.SpecComplete.Gaps

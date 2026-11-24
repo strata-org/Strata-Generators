@@ -86,7 +86,7 @@ def checkContextGrowth (inCtx outCtx : VarCtx) (cmds : List (Cmd Expression)) : 
     0. -/
 def envFromVarCtx (ctx : VarCtx) : Core.Env :=
   ctx.foldl (fun env (name, mty) =>
-    CmdEval.update env name (.forAll [] mty) (.intConst () 0))
+    CmdEval.update env name (.forAll [] mty) (.intConst genLoc 0))
     Core.Env.init
 
 /-- Builds an `Env` from a `VarCtx`. Each variable gets a *well-typed* placeholder value, which is a
@@ -99,7 +99,7 @@ def envFromVarCtx (ctx : VarCtx) : Core.Env :=
     the *start* is well-typed and a failure therefore comes from the evaluation of the command. -/
 def envFromVarCtxWellTyped (ctx : VarCtx) : Core.Env :=
   ctx.foldl (fun env (name, mty) =>
-    CmdEval.update env name (.forAll [] mty) (.fvar () name (some mty)))
+    CmdEval.update env name (.forAll [] mty) (.fvar genLoc name (some mty)))
     Core.Env.init
 
 -- ── The properties that use evaluation ────────────────────────────────

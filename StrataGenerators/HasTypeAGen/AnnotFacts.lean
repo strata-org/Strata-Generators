@@ -42,19 +42,19 @@ structure ClosureHyps (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
   polyArgs : ∀ τ gen sampled name cats, T τ → (∀ t ∈ gen, T t) → (∀ t ∈ sampled, T t) →
     sampled.length = max 3 (maxBinders pctx) →
     (name, cats) ∈ findPolymorphicOps pctx τ gen sampled 3 → ∀ a ∈ cats, T a
-  const : ∀ c, P (.const () c)
-  bvar : ∀ i, P (.bvar () i)
-  fvar : ∀ p ∈ fctx, P (.fvar () ⟨p.1, ()⟩ (some p.2))
-  op : ∀ p ∈ octx.ops, P (.op () ⟨p.1, ()⟩ (some p.2))
+  const : ∀ c, P (.const genLoc c)
+  bvar : ∀ i, P (.bvar genLoc i)
+  fvar : ∀ p ∈ fctx, P (.fvar genLoc ⟨p.1, ()⟩ (some p.2))
+  op : ∀ p ∈ octx.ops, P (.op genLoc ⟨p.1, ()⟩ (some p.2))
   polyOp : ∀ τ gen sampled name cats, T τ → (∀ t ∈ gen, T t) → (∀ t ∈ sampled, T t) →
     sampled.length = max 3 (maxBinders pctx) →
     (name, cats) ∈ findPolymorphicOps pctx τ gen sampled 3 →
-    P (.op () ⟨name, ()⟩ (some (cats.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)))
-  abs : ∀ τ body, T τ → P body → P (.abs () "" (some τ) body)
-  app : ∀ f a, P f → P a → P (.app () f a)
-  ite : ∀ c t f, P c → P t → P f → P (.ite () c t f)
-  eq : ∀ a b, P a → P b → P (.eq () a b)
-  quant : ∀ k τ tr body, T τ → P tr → P body → P (.quant () k "" (some τ) tr body)
+    P (.op genLoc ⟨name, ()⟩ (some (cats.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)))
+  abs : ∀ τ body, T τ → P body → P (.abs genLoc "" (some τ) body)
+  app : ∀ f a, P f → P a → P (.app genLoc f a)
+  ite : ∀ c t f, P c → P t → P f → P (.ite genLoc c t f)
+  eq : ∀ a b, P a → P b → P (.eq genLoc a b)
+  quant : ∀ k τ tr body, T τ → P tr → P body → P (.quant genLoc k "" (some τ) tr body)
 
 /-- `g` draws only terms satisfying `P`, at every type satisfying `T` and in every binder context
     whose types satisfy `T`. -/
@@ -194,7 +194,7 @@ theorem ClosureHyps.mkApps (H : ClosureHyps fctx octx pctx tvars T P) :
     exact hbase
   | cons a rest ih =>
     intro base hbase hargs
-    exact ih (.app () base a) (H.app base a hbase (hargs a List.mem_cons_self))
+    exact ih (.app genLoc base a) (H.app base a hbase (hargs a List.mem_cons_self))
       (fun x hx => hargs x (List.mem_cons_of_mem a hx))
 
 variable {g : BVarCtx → LMonoTy → SPMF LExpr'}
@@ -209,7 +209,7 @@ carry the type conditions in their postcondition. -/
 theorem ClosureHyps.app_of (H : ClosureHyps fctx octx pctx tvars T P) {b : BVarCtx}
     {τ τ' : LMonoTy} {fn arg : LExpr'}
     (hfn : (∀ x ∈ b, T x) → T (.arrow τ' τ) → P fn) (harg : (∀ x ∈ b, T x) → T τ' → P arg)
-    (hb : ∀ x ∈ b, T x) (hτ : T τ) (hτ' : T τ') : P (.app () fn arg) :=
+    (hb : ∀ x ∈ b, T x) (hτ : T τ) (hτ' : T τ') : P (.app genLoc fn arg) :=
   H.app fn arg (hfn hb ((H.arrow τ' τ).mpr ⟨hτ', hτ⟩)) (harg hb hτ')
 
 /-- A conditional whose condition is drawn at `bool` and whose branches are drawn at a type `τ`
@@ -217,14 +217,14 @@ theorem ClosureHyps.app_of (H : ClosureHyps fctx octx pctx tvars T P) {b : BVarC
 theorem ClosureHyps.ite_of (H : ClosureHyps fctx octx pctx tvars T P) {b : BVarCtx}
     {τ : LMonoTy} {c t f : LExpr'}
     (hc : (∀ x ∈ b, T x) → T .bool → P c) (ht : (∀ x ∈ b, T x) → T τ → P t)
-    (hf : (∀ x ∈ b, T x) → T τ → P f) (hb : ∀ x ∈ b, T x) (hτ : T τ) : P (.ite () c t f) :=
+    (hf : (∀ x ∈ b, T x) → T τ → P f) (hb : ∀ x ∈ b, T x) (hτ : T τ) : P (.ite genLoc c t f) :=
   H.ite c t f (hc hb H.bool) (ht hb hτ) (hf hb hτ)
 
 /-- An equality whose sides are drawn at a type satisfying `T` satisfies `P`. -/
 theorem ClosureHyps.eq_of (H : ClosureHyps fctx octx pctx tvars T P) {b : BVarCtx}
     {τ' : LMonoTy} {e₁ e₂ : LExpr'}
     (h₁ : (∀ x ∈ b, T x) → T τ' → P e₁) (h₂ : (∀ x ∈ b, T x) → T τ' → P e₂)
-    (hb : ∀ x ∈ b, T x) (hτ' : T τ') : P (.eq () e₁ e₂) :=
+    (hb : ∀ x ∈ b, T x) (hτ' : T τ') : P (.eq genLoc e₁ e₂) :=
   H.eq e₁ e₂ (h₁ hb hτ') (h₂ hb hτ')
 
 /-- A quantifier whose binder and trigger types satisfy `T`, and whose trigger and body are drawn
@@ -232,7 +232,7 @@ theorem ClosureHyps.eq_of (H : ClosureHyps fctx octx pctx tvars T P) {b : BVarCt
 theorem ClosureHyps.quant_of (H : ClosureHyps fctx octx pctx tvars T P) {b : BVarCtx}
     {k : QuantifierKind} {τ' τtr : LMonoTy} {tr body : LExpr'}
     (htr : (∀ x ∈ τ' :: b, T x) → T τtr → P tr) (hbody : (∀ x ∈ τ' :: b, T x) → T .bool → P body)
-    (hb : ∀ x ∈ b, T x) (hτ' : T τ') (hτtr : T τtr) : P (.quant () k "" (some τ') tr body) :=
+    (hb : ∀ x ∈ b, T x) (hτ' : T τ') (hτtr : T τtr) : P (.quant genLoc k "" (some τ') tr body) :=
   have hb' : ∀ x ∈ τ' :: b, T x := List.forall_mem_cons.mpr ⟨hτ', hb⟩
   H.quant k τ' tr body hτ' (htr hb' hτtr) (hbody hb' H.bool)
 
@@ -241,7 +241,7 @@ theorem ClosureHyps.quant_of (H : ClosureHyps fctx octx pctx tvars T P) {b : BVa
 theorem ClosureHyps.abs_of (H : ClosureHyps fctx octx pctx tvars T P) {b : BVarCtx}
     {τ₁ τ₂ : LMonoTy} {body : LExpr'}
     (hbody : (∀ x ∈ τ₁ :: b, T x) → T τ₂ → P body) (hb : ∀ x ∈ b, T x) (h₁ : T τ₁) (h₂ : T τ₂) :
-    P (.abs () "" (some τ₁) body) :=
+    P (.abs genLoc "" (some τ₁) body) :=
   H.abs τ₁ body h₁ (hbody (List.forall_mem_cons.mpr ⟨h₁, hb⟩) h₂)
 
 /-- Every term the monomorphic Indir rule draws satisfies `P` when the argument generator `g`
@@ -298,7 +298,7 @@ theorem genIndirPolyCore_cases {fctx : FVarCtx} {octx : OpCtx} {pctx : PolyOpCtx
        (name, cats) ∈ findPolymorphicOps pctx τ
          (generableTypesFromCtx bctx fctx octx) sampled maxNumArgs ∧
        List.Forall₂ (fun arg σ => arg ∈ SPMF.support (genArg σ)) args cats ∧
-       e = mkApps (.op () ⟨name, ()⟩
+       e = mkApps (.op genLoc ⟨name, ()⟩
          (some (cats.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) args)
     ∨ e ∈ SPMF.support fallback := by
   unfold genIndirPolyCore at he
@@ -906,7 +906,7 @@ theorem annotsOk_op {C : LContext CoreLParams} {ts : TypeScopes}
       f.type = .ok (.forAll f.typeArgs (LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd))))
     {name : String} {ty : LMonoTy} {f : LFunc CoreLParams} (hf : C.functions[name]? = some f)
     {σ : Subst} (hty : ty = LMonoTy.subst σ (LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd))) :
-    AnnotsOk C ts (.op () ⟨name, ()⟩ (some ty)) := by
+    AnnotsOk C ts (.op genLoc ⟨name, ()⟩ (some ty)) := by
   refine ⟨fun t ht => ?_, ⟨fun x ann hx => ?_, fun o ty' hx => ?_, fun o hx => ?_⟩⟩
   · simp [LExpr.binderAnnotations] at ht
   · simp [LExpr.freeVars] at hx

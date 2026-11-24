@@ -322,7 +322,7 @@ theorem knownOrTrue_exprWellTyped {C : LContext CoreLParams} {ts : TypeScopes}
   split
   · rename_i hknown
     exact he hknown
-  · exact ⟨LExpr.HasTypeA.const, annotsOk_of_empty rfl rfl rfl rfl⟩
+  · exact ⟨LExpr.HasTypeA.const rfl, annotsOk_of_empty rfl rfl rfl rfl⟩
 
 /-- A well-typed command stays well-typed when its output scopes are replaced by equivalent
     ones: scopes with the same lookup for every name. -/

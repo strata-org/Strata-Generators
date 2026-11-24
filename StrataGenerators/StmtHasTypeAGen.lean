@@ -485,7 +485,9 @@ theorem genCallTail_support
       r = ⟨StrataGenerators.Stmt.initChain
               ((StrataGenerators.Stmt.substSig σ s.M).filter (needsInit ctx)
                 ++ T.filter (needsInit ctx))
-            ++ [Statement.call s.pname (StrataGenerators.Stmt.mkArgs s.M T exprs mask) default],
+            ++ [Statement.call s.pname
+                  (callTyArgs s.typeArgs σ)
+                  (StrataGenerators.Stmt.mkArgs s.M T exprs mask) default],
           C, StrataGenerators.Stmt.insertAllCtx ctx
             ((StrataGenerators.Stmt.substSig σ s.M).filter (needsInit ctx)
               ++ T.filter (needsInit ctx))⟩ := by
@@ -521,7 +523,9 @@ theorem genCallTail_mem
     (hgen : exprs.all (binderAnnotsKnownIn C.knownTypes) = true) :
     (⟨StrataGenerators.Stmt.initChain
         ((StrataGenerators.Stmt.substSig σ s.M).filter (needsInit ctx) ++ T.filter (needsInit ctx))
-        ++ [Statement.call s.pname (StrataGenerators.Stmt.mkArgs s.M T exprs mask) default],
+        ++ [Statement.call s.pname
+              (callTyArgs s.typeArgs σ)
+              (StrataGenerators.Stmt.mkArgs s.M T exprs mask) default],
       C, StrataGenerators.Stmt.insertAllCtx ctx
         ((StrataGenerators.Stmt.substSig σ s.M).filter (needsInit ctx)
           ++ T.filter (needsInit ctx))⟩ : GenStmtResult) ∈
@@ -579,11 +583,14 @@ theorem genCallStmt_outCtx {procs : ProcSigCtx}
     generable type, or the `bool` fallback, and both are well-kinded. -/
 theorem sampleTyArg_wellKinded {procs : ProcSigCtx} {C : LContext CoreLParams}
     {ctx : VarCtx} (hWK : WellKindedOk octx procs C ctx) (t : LMonoTy)
-    (ht : t ∈ SPMF.support (sampleTyArg (G := SPMF) (generableTypesFromCtx ctx.values [] octx))) :
+    (ht : t ∈ SPMF.support
+      (sampleTyArg (G := SPMF) tvars (generableTypesFromCtx ctx.values [] octx))) :
     C.WellKindedTy t := by
   unfold sampleTyArg at ht
+  dsimp only at ht
   split at ht
-  · exact hWK.generable t (by rwa [mem_support_elements_iff] at ht)
+  · have hfilt := List.mem_filter.mp (by rwa [mem_support_elements_iff] at ht)
+    exact hWK.generable t hfilt.1
   · rw [mem_support_pure_iff] at ht; rw [ht]; exact hWK.boolWK
 
 /-- The instantiation that `genCallStmt` samples for the type parameters of a callee is
@@ -592,7 +599,7 @@ private theorem sampled_inst_wellKinded {procs : ProcSigCtx} {C : LContext CoreL
     {ctx : VarCtx} (hWK : WellKindedOk octx procs C ctx) {typeArgs : List TyIdentifier}
     {σvals : List LMonoTy}
     (hσvals : σvals ∈ SPMF.support (typeArgs.mapM (fun _ =>
-      sampleTyArg (G := SPMF) (generableTypesFromCtx ctx.values [] octx)))) :
+      sampleTyArg (G := SPMF) tvars (generableTypesFromCtx ctx.values [] octx)))) :
     ∀ t ∈ (typeArgs.zip σvals).map Prod.snd, C.WellKindedTy t := by
   intro t ht
   obtain ⟨q, hq, rfl⟩ := List.mem_map.mp ht
@@ -709,7 +716,7 @@ theorem genCallTail_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     · exact List.all_eq_true.mp hMusable q h
     · exact List.all_eq_true.mp hTusable q h
   -- Callee signature facts from the correspondence.
-  obtain ⟨proc, hfind, _, hInputs, hOutputs, hIdisjOut, hOutNodup⟩ := hProcs s hs
+  obtain ⟨proc, hfind, hTyArgs, hInputs, hOutputs, hIdisjOut, hOutNodup⟩ := hProcs s hs
   have hMnotO : ∀ k ∈ s.M.keys, k ∉ s.O.keys := by
     rw [lm_keys_append] at hOutNodup
     exact fun k hk hkO => (List.nodup_append.mp hOutNodup).2.2 k hk k hkO rfl
@@ -783,7 +790,8 @@ theorem genCallTail_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
   -- instantiated ones the generator used. Rewrite them back to `substSig σ …`.
   rw [← hMσ] at hNodup hReuse ⊢
   rw [← hOσ] at hTVals
-  exact call_mixed_body_sound σ s.M s.I s.O T exprs mask hfind hInputs hOutputs
+  rw [← hTyArgs]
+  exact call_mixed_body_sound σ s.M s.I s.O T exprs mask hσWK hfind hInputs hOutputs
     hExLen hTVals hExTy hIdisjOut hMnotO hNodup hReuse hwk
 
 /-- The soundness of `genCallStmt`, at each depth. Each emitted *group* of a call (the `init`
@@ -843,10 +851,7 @@ theorem genCallStmt_mem_complete (procs : ProcSigCtx)
     (σvals : List LMonoTy)
     (hσvals : σvals ∈ SPMF.support
       (s.typeArgs.mapM (fun _ =>
-        if hg : (generableTypesFromCtx ctx.values [] octx).length > 0 then
-          elements (generableTypesFromCtx ctx.values [] octx)
-            (by apply List.ne_nil_of_length_pos; assumption)
-        else pure (.bool : LMonoTy)) : SPMF (List LMonoTy)))
+        sampleTyArg tvars (generableTypesFromCtx ctx.values [] octx)) : SPMF (List LMonoTy)))
     (exprs : List Expression.Expr) (mask : List Bool)
     (hMusable : (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).all
       (usableName immutableVars ctx) = true)
@@ -864,6 +869,7 @@ theorem genCallStmt_mem_complete (procs : ProcSigCtx)
           ++ (outTargets immutableVars ctx
                 (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O) (functionNames C)).filter (needsInit ctx))
         ++ [Statement.call s.pname
+              (callTyArgs s.typeArgs (s.typeArgs.zip σvals))
               (StrataGenerators.Stmt.mkArgs s.M
                 (outTargets immutableVars ctx
                   (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O) (functionNames C)) exprs mask) default],
@@ -1125,25 +1131,95 @@ theorem matchedTyArg_wellKinded {procs : ProcSigCtx} {C : LContext CoreLParams} 
     (hWK : WellKindedOk octx procs C ctx) (substs : List Lambda.Subst)
     (hsub : ∀ sb ∈ substs, Subst.RangeKnown sb C.knownTypes) (f : TyIdentifier) (t : LMonoTy)
     (ht : t ∈ SPMF.support
-      (matchedTyArg (G := SPMF) (generableTypesFromCtx ctx.values [] octx) substs f)) :
+      (matchedTyArg (G := SPMF) tvars (generableTypesFromCtx ctx.values [] octx) substs f)) :
     C.WellKindedTy t := by
   unfold matchedTyArg at ht
   rcases hfs : substs.findSome? (fun sb => Strata.Util.HMaps.find? sb f) with _ | t'
   · rw [hfs] at ht
     exact sampleTyArg_wellKinded hWK t ht
   · rw [hfs] at ht
-    simp only [mem_support_pure_iff] at ht
-    subst ht
     obtain ⟨sb, hsbmem, hsbfind⟩ := List.exists_of_findSome?_eq_some hfs
-    exact LMonoTy.knownInstance_wellKinded t C.knownTypes
-      (hsub sb hsbmem t (Strata.Util.HMaps.find?_mem_values sb hsbfind))
+    dsimp only at ht
+    split at ht
+    · simp only [mem_support_pure_iff] at ht
+      subst ht
+      exact LMonoTy.knownInstance_wellKinded t C.knownTypes
+        (hsub sb hsbmem t (Strata.Util.HMaps.find?_mem_values sb hsbfind))
+    · exact sampleTyArg_wellKinded hWK t ht
 
-/-- **What a `genCallStmtMatch` result looks like.** The result is a `genCallTail` group for a
-    callee `s` of the procedure context, the instantiation `s.typeArgs.zip σvals`, and the out
-    arguments that `matchOutTargets` builds from the chosen targets. There is a chosen target for
-    each out-only formal. Each chosen variable is in the scope and is mutable, and each instantiated
-    formal has the type of its chosen variable. When the scope, the callees and the operators are
-    well-kinded, each instantiated type argument is well-kinded. -/
+/-- The type that `sampleTyArg` draws has its type variables in `tvars`. -/
+theorem sampleTyArg_tyVarsWithin (generableTys : List LMonoTy) (t : LMonoTy)
+    (ht : t ∈ SPMF.support (sampleTyArg (G := SPMF) tvars generableTys)) :
+    tyVarsWithin tvars t = true := by
+  unfold sampleTyArg at ht
+  dsimp only at ht
+  split at ht
+  · exact (List.mem_filter.mp (by rwa [mem_support_elements_iff] at ht)).2
+  · rw [mem_support_pure_iff] at ht
+    subst ht
+    rfl
+
+/-- The type that `matchedTyArg` draws has its type variables in `tvars`. -/
+theorem matchedTyArg_tyVarsWithin (generableTys : List LMonoTy) (substs : List Lambda.Subst)
+    (f : TyIdentifier) (t : LMonoTy)
+    (ht : t ∈ SPMF.support (matchedTyArg (G := SPMF) tvars generableTys substs f)) :
+    tyVarsWithin tvars t = true := by
+  unfold matchedTyArg at ht
+  rcases hfs : substs.findSome? (fun sb => Strata.Util.HMaps.find? sb f) with _ | t'
+  · rw [hfs] at ht
+    exact sampleTyArg_tyVarsWithin generableTys t ht
+  · rw [hfs] at ht
+    dsimp only at ht
+    split at ht
+    · rename_i hwithin
+      rw [mem_support_pure_iff] at ht
+      subst ht
+      exact hwithin
+    · exact sampleTyArg_tyVarsWithin generableTys t ht
+
+/-- A variable of a type within `tvars` is in `tvars`. -/
+theorem mem_of_tyVarsWithin {t : LMonoTy} {v : TyIdentifier}
+    (h : tyVarsWithin tvars t = true) (hv : v ∈ t.freeVars) : v ∈ tvars :=
+  List.contains_iff_mem.mp (List.all_eq_true.mp h v hv)
+
+/-- A type that `genLMonoTy tvars` draws has its type variables in `tvars`. -/
+theorem tyVarsWithin_of_genLMonoTy {n : Nat} {t : LMonoTy}
+    (h : t ∈ SPMF.support (genLMonoTy (G := SPMF) tvars n)) : tyVarsWithin tvars t = true :=
+  List.all_eq_true.mpr fun v hv =>
+    List.contains_iff_mem.mpr (allFtvarsIn_freeVars (genLMonoTy_mem_ftvars h) v hv)
+
+/-- A type whose variables are bound by a zipped substitution stays within `tvars` when the
+    substituted values do. -/
+theorem subst_zip_tyVarsWithin (typeArgs : List TyIdentifier) (σvals : List LMonoTy)
+    (hlen : typeArgs.length ≤ σvals.length) (hσ : ∀ t ∈ σvals, tyVarsWithin tvars t = true)
+    (ty : LMonoTy) (hty : ∀ v ∈ ty.freeVars, v ∈ typeArgs) :
+    tyVarsWithin tvars
+      (LMonoTy.subst (Strata.Util.HMaps.ofScopes [typeArgs.zip σvals]) ty) = true := by
+  unfold tyVarsWithin
+  refine List.all_eq_true.mpr fun x hx => ?_
+  rcases LMonoTy.mem_freeVars_subst _ ty x hx with hrange | ⟨hfree, hnone⟩
+  · obtain ⟨w, hw, hxw⟩ := List.mem_flatMap.mp hrange
+    have hwval : w ∈ σvals := Subst.mem_values_ofZip hw
+    exact List.all_eq_true.mp (hσ w hwval) x hxw
+  · have hsome := Subst.find?_ofZip_isSome_of_mem hlen (hty x hfree)
+    have hnone' : Strata.Util.HMaps.find? (Subst.ofZip typeArgs σvals) x = none := hnone
+    rw [hnone'] at hsome
+    have hnotSome : ¬ (none : Option LMonoTy).isSome = true := by
+      simp only [Option.isSome_none, Bool.false_eq_true, not_false_eq_true]
+    exact absurd hsome hnotSome
+
+/-- The fresh names of a callee's type parameters are as many as the parameters. -/
+theorem freshTyArgs_length (avoid : List TyIdentifier) (n : Nat) :
+    (freshTyArgs avoid n).length = n := by
+  unfold freshTyArgs
+  have hsupply := freshNameSupply_length_ge (avoid.length + n)
+  have hfilter := Freshening.length_filter_notMem_ge (freshNameSupply (avoid.length + n)) avoid
+    (freshNameSupply_nodup (avoid.length + n))
+  simp only [List.length_take]
+  omega
+
+/-- A `genCallStmtMatch` result is a `genCallTail` group for a callee, with one instantiation value
+    per type parameter, each within `tvars`, and out targets chosen from the mutable scope. -/
 theorem genCallStmtMatch_cases {procs : ProcSigCtx} {C : LContext CoreLParams} {ctx : VarCtx}
     {d : Nat} (r : GenStmtResult)
     (hr : r ∈ SPMF.support
@@ -1152,6 +1228,8 @@ theorem genCallStmtMatch_cases {procs : ProcSigCtx} {C : LContext CoreLParams} {
       s ∈ procs ∧
       (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O).length ≤ chosen.length ∧
       (∀ v, some v ∈ chosen → List.Mem v ctx ∧ immutableVars.contains v.1 = false) ∧
+      σvals.length = s.typeArgs.length ∧
+      (∀ t ∈ σvals, tyVarsWithin tvars t = true) ∧
       (WellKindedOk octx procs C ctx →
         ∀ t ∈ (s.typeArgs.zip σvals).map Prod.snd, C.WellKindedTy t) ∧
       targetsMatched (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O) chosen = true ∧
@@ -1209,7 +1287,15 @@ theorem genCallStmtMatch_cases {procs : ProcSigCtx} {C : LContext CoreLParams} {
         have hlen' : (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O).length
             ≤ chosen.length := by
           rw [StrataGenerators.Stmt.substSig_length]; omega
-        exact ⟨s, chosen, σvals, hs', hlen', hcand, hσWK, hmatched, hr⟩
+        have hmapM := (mem_support_mapM_iff _ _ σvals).mp hσvals
+        have hσlen : σvals.length = s.typeArgs.length := by
+          rw [hmapM.length_eq]
+          exact freshTyArgs_length _ _
+        have hσbound : ∀ t ∈ σvals, tyVarsWithin tvars t = true := by
+          intro t ht
+          obtain ⟨f, _, hmem⟩ := forall₂_mem_left hmapM t ht
+          exact matchedTyArg_tyVarsWithin _ substs f t hmem
+        exact ⟨s, chosen, σvals, hs', hlen', hcand, hσlen, hσbound, hσWK, hmatched, hr⟩
       · simp only [mem_support_bot_iff] at hr
 
 -- ── The matching call generator `genCallStmtMatch`: facts that `genStmt` needs ──────────────────
@@ -1222,7 +1308,7 @@ theorem genCallStmtMatch_outCtx {procs : ProcSigCtx}
     (hr : r ∈ SPMF.support
       (genCallStmtMatch (G := SPMF) octx tvars immutableVars procs C ctx d pctx)) :
     Map.Functional r.outCtx := by
-  obtain ⟨_, _, _, _, _, _, _, _, hr⟩ := genCallStmtMatch_cases r hr
+  obtain ⟨_, _, _, _, _, _, _, _, _, _, hr⟩ := genCallStmtMatch_cases r hr
   exact genCallTail_outCtx hFun r hr
 
 /-- Every `genCallStmtMatch` result extends the variable scope only by well-kinded types: when the
@@ -1235,7 +1321,7 @@ theorem genCallStmtMatch_outCtx_wellKinded {procs : ProcSigCtx}
     (hr : r ∈ SPMF.support
       (genCallStmtMatch (G := SPMF) octx tvars immutableVars procs C ctx d pctx)) :
     WellKindedOk octx procs r.outC r.outCtx := by
-  obtain ⟨_, _, _, hs, hlen, _, hσWK, _, hr⟩ := genCallStmtMatch_cases r hr
+  obtain ⟨_, _, _, hs, hlen, _, _, _, hσWK, _, hr⟩ := genCallStmtMatch_cases r hr
   exact genCallTail_outCtx_wellKinded hWK hs (hσWK hWK) (matchOutTargets_values _ _ _ hlen) r hr
 
 /-- A `genCallStmtMatch` result leaves the ambient context `C` unchanged. -/
@@ -1245,7 +1331,7 @@ theorem genCallStmtMatch_outC {procs : ProcSigCtx}
     (hr : r ∈ SPMF.support
       (genCallStmtMatch (G := SPMF) octx tvars immutableVars procs C ctx d pctx)) :
     r.outC = C := by
-  obtain ⟨_, _, _, _, _, _, _, _, hr⟩ := genCallStmtMatch_cases r hr
+  obtain ⟨_, _, _, _, _, _, _, _, _, _, hr⟩ := genCallStmtMatch_cases r hr
   obtain ⟨_, exprs, mask, _, _, rfl⟩ := genCallTail_support hr
   rfl
 
@@ -1264,7 +1350,7 @@ theorem genCallStmtMatch_sound (P : Program) (env : GenStmtSoundEnv octx tvars p
       (genCallStmtMatch (G := SPMF) octx tvars immutableVars procs C ctx d pctx)) :
     StatementsWellTyped P C (env.toTCtx ctx).types labels r.stmts r.outC
       (env.toTCtx r.outCtx).types := by
-  obtain ⟨s, chosen, _, hs, hlen, hcand, hσWK, hmatched, hr⟩ := genCallStmtMatch_cases r hr
+  obtain ⟨s, chosen, _, hs, hlen, hcand, _, _, hσWK, hmatched, hr⟩ := genCallStmtMatch_cases r hr
   exact genCallTail_sound P env procs hProcs C ctx d hWK hops hFun s hs _ _ (hσWK hWK)
     (matchOutTargets_values _ _ _ hlen)
     (matchOutTargets_all_usableName ctx hFun _ (maxNameLen_le_outNameBase ctx _) _ chosen

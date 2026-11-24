@@ -1,4 +1,4 @@
-import Strata.Languages.Core.StatementTypeSpec
+import Strata.Languages.Core.Typing.Spec.StatementTypeSpec
 import StrataGenerators.CmdHasTypeAGen.Core
 
 open Lambda Core Imperative
@@ -51,6 +51,13 @@ instance : Inhabited ProcSig := ⟨⟨"", [], [], [], []⟩⟩
 def substSig (σ : List (TyIdentifier × LMonoTy)) (block : @LMonoTySignature Unit) :
     @LMonoTySignature Unit :=
   block.map (fun p => (p.1, LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) p.2))
+
+/-- The type arguments a call carries when it instantiates the callee's type parameters
+    `typeArgs` by `σ`. -/
+abbrev callTyArgs (typeArgs : List TyIdentifier) (σ : List (TyIdentifier × LMonoTy)) :
+    Option (List LTy) :=
+  some (typeArgs.map
+    (fun a => LTy.forAll [] (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (.ftvar a))))
 
 /-- `substSig` preserves keys (it only rewrites types). -/
 @[simp] theorem substSig_keys (σ : List (TyIdentifier × LMonoTy))
@@ -197,6 +204,13 @@ def mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
     expression is required). -/
 def initChain (news : List (Identifier Unit × LMonoTy)) : List Statement :=
   news.map (fun p => Statement.init p.1 (.forAll [] p.2) .nondet default)
+
+/-- The commands of a concatenation are the commands of its parts. -/
+theorem stmtsCmds_append (xs ys : List Statement) :
+    stmtsCmds (xs ++ ys) = stmtsCmds xs ++ stmtsCmds ys := by
+  induction xs with
+  | nil => rfl
+  | cons s rest ih => simp only [List.cons_append, stmtsCmds, ih, List.append_assoc]
 
 /-- The flat `VarCtx` analogue of `insertAll`: the *generator-side* scope after running
     `initChain news` in the ambient scope. Because the chain is emitted **inline** (not inside a block), these

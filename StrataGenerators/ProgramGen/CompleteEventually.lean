@@ -119,7 +119,7 @@ theorem extendDatatype_eventually {block : MutualDatatype Unit} {C' : LContext C
         s.baseTypes (s.tyCons ++ s.dtCons) N N N N N N s.reserved))
     (hnamesAllowed : ∀ d ∈ block, isAllowedName d.name = true)
     (hnamesNotLocal : ∀ d ∈ block, isLocalTypeName d.name = false)
-    (hC : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+    (hC : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit _
       _ s.C block = .ok C') :
     Eventually fun N => (([.type (.data block) .empty]),
         { s with C := C'

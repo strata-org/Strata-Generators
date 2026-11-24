@@ -6,7 +6,7 @@ import StrataGenerators.DatatypeGenProofs
 import StrataGenerators.FunctionHasTypeAGen.Core
 import StrataGenerators.ProcedureHasTypeAGen.Core
 import StrataGenerators.HasTypeAGen.Defs
-import Strata.Languages.Core.ProgramTypeSpec
+import Strata.Languages.Core.Typing.Spec.ProgramTypeSpec
 
 open Lambda RandomChoice Core Core.TypeSpec Imperative
 open DatatypeGen
@@ -239,7 +239,7 @@ type arguments). -/
     `HasTypeA.op`, and resolvable by the checker because `genDeclDistinct`
     declares every `c ∈ names` as a 0-ary function at `τ` first. -/
 def distinctElems (τ : LMonoTy) (names : List String) : List PExpr :=
-  names.map (fun c => (.op () ⟨c, ()⟩ (some τ) : PExpr))
+  names.map (fun c => (.op genLoc ⟨c, ()⟩ (some τ) : PExpr))
 
 /-- Draw the ingredients of a `distinct` declaration: a fresh declaration name, a
     ground element type `τ`, and at least two fresh constant names, of which those the checker accepts as
@@ -349,7 +349,7 @@ def DerivedOpFamilies.admits (sel : DerivedOpFamilies) : DerivedOpFamily → Boo
     so the vocabulary is read off the very factory the context received. -/
 def blockDerivedFactory (block : MutualDatatype Unit) :
     Option (@Lambda.Factory LExprParams') :=
-  (@Lambda.genBlockFactory LExprParams' instInhabitedPUnit instInhabitedPUnit
+  (@Lambda.genBlockFactory LExprParams' _ instInhabitedPUnit
     _ _ block).toOption
 
 /-- The quantified type variables of a type scheme. `[]` exactly when the scheme

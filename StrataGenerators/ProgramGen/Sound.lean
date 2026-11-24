@@ -680,6 +680,10 @@ structure Inv (s : GenState) : Prop where
   /-- The in-out and out-only types of every callable procedure are well kinded in `C`; a call
       declares and writes variables at instances of them. -/
   sigsWK : ∀ sig ∈ s.procs, ∀ ty ∈ (sig.M ++ sig.O).values, s.C.WellKindedTy ty
+  /-- The in-out and out-only types of every callable procedure mention only the type parameters of
+      that procedure; a call declares variables at instances of them. -/
+  sigsTyVars : ∀ sig ∈ s.procs, ∀ ty ∈ (sig.M ++ sig.O).values, ∀ v ∈ ty.freeVars,
+    v ∈ sig.typeArgs
   /-- The operators and polymorphic schemes generated expressions draw on agree with the functions
       of `C`, and `C` gives every function the type scheme of its signature. -/
   exprCtx : ExprCtxOk s.C [] [] s.octx (s.pctx ++ s.derivedPctx)
@@ -888,15 +892,18 @@ theorem inv_cons_reserved {s : GenState} (hinv : Inv s) (name : String) :
       rigidNil := hinv.rigidNil
       octxWK := hinv.octxWK
       sigsWK := hinv.sigsWK
+      sigsTyVars := hinv.sigsTyVars
       exprCtx := hinv.exprCtx
       polysClosed := hinv.polysClosed }
 
 /-- A state whose only changes from `s` are prepending `name` to `reserved` and `sig` to `procs`
-    keeps `Inv`, provided the in-out and out-only types of `sig` are well kinded in `C`. The
-    agreement of the callable signatures with the finished program is not part of `Inv`. -/
+    keeps `Inv`, provided the in-out and out-only types of `sig` are well kinded in `C` and mention
+    only the type parameters of `sig`. The agreement of the callable signatures with the finished
+    program is not part of `Inv`. -/
 theorem inv_cons_reserved_procs {s : GenState} (hinv : Inv s) (name : String)
     (sig : StrataGenerators.Stmt.ProcSig)
-    (hsigWK : ∀ ty ∈ (sig.M ++ sig.O).values, s.C.WellKindedTy ty) :
+    (hsigWK : ∀ ty ∈ (sig.M ++ sig.O).values, s.C.WellKindedTy ty)
+    (hsigTyVars : ∀ ty ∈ (sig.M ++ sig.O).values, ∀ v ∈ ty.freeVars, v ∈ sig.typeArgs) :
     Inv { s with reserved := name :: s.reserved, procs := sig :: s.procs } := by
   -- Every `Inv` field reads only `C`/`Γ`/`baseTypes`/`tyCons`/`dtCons`/`reserved`,
   -- all of which agree with `{ s with reserved := name :: s.reserved }`.
@@ -922,6 +929,10 @@ theorem inv_cons_reserved_procs {s : GenState} (hinv : Inv s) (name : String)
         rcases List.mem_cons.mp hg with rfl | hg
         · exact hsigWK
         · exact hinv.sigsWK g hg
+      sigsTyVars := fun g hg => by
+        rcases List.mem_cons.mp hg with rfl | hg
+        · exact hsigTyVars
+        · exact hinv.sigsTyVars g hg
       exprCtx := h.exprCtx
       polysClosed := h.polysClosed }
 
@@ -952,6 +963,7 @@ theorem inv_grow_reserved {s : GenState} (hinv : Inv s) (extra : List String) :
       rigidNil := hinv.rigidNil
       octxWK := hinv.octxWK
       sigsWK := hinv.sigsWK
+      sigsTyVars := hinv.sigsTyVars
       exprCtx := hinv.exprCtx
       polysClosed := hinv.polysClosed }
 
@@ -1045,6 +1057,7 @@ theorem inv_addFactory {s : GenState} (hinv : Inv s) {fn : LFunc CoreLParams}
         unfold LContext.WellKindedTy; rw [hkt]; exact hinv.octxWK p hp
       sigsWK := fun sig hsig ty hty => by
         unfold LContext.WellKindedTy; rw [hkt]; exact hinv.sigsWK sig hsig ty hty
+      sigsTyVars := hinv.sigsTyVars
       exprCtx := hctx
       polysClosed := hinv.polysClosed }
 
@@ -1346,6 +1359,7 @@ theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
           hmono _ _ (hinv.datatypesKnown d (by rw [hdt] at hd; exact hd))
         octxWK := fun p hp => wellKindedTy_mono hmono (hinv.octxWK p hp)
         sigsWK := fun sig hsig ty hty => wellKindedTy_mono hmono (hinv.sigsWK sig hsig ty hty)
+        sigsTyVars := hinv.sigsTyVars
         exprCtx := hinv.exprCtx.mono (addKnownTypeWithError_functions hadd) hmono
         polysClosed := hinv.polysClosed }
     · -- `ContextOk C'` at the *grown* pool (interleaving direction (2)).
@@ -1846,7 +1860,7 @@ theorem genDeclStep_typeNames {s : GenState} {b : Bounds} {ds : List Decl} {s' :
     obtain ⟨block, _, hmatch⟩ := hmem
     split at hmatch
     · rename_i hgate
-      cases hadd : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+      cases hadd : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit _
           _ s.C block with
       | error e =>
         rw [hadd] at hmatch
@@ -2004,19 +2018,19 @@ theorem foldlM_tryPush_ok_of_names_sub {i₁ : Inhabited CoreLParams.Metadata}
     `bool` and its datatypes. -/
 theorem genBlockFactory_sigsKnown_of_addMutualBlock {C C' : LContext CoreLParams}
     {block : MutualDatatype Unit}
-    (h : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+    (h : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit _
       _ C block = .ok C')
     (hdk : C.DatatypesKnown)
     (harrow : C.knownTypes["arrow"]? = some 2) (hbool : C.knownTypes["bool"]? = some 0) :
     ∀ (fgen : Factory CoreLParams),
-      @genBlockFactory CoreLParams instInhabitedPUnit instInhabitedPUnit
+      @genBlockFactory CoreLParams _ instInhabitedPUnit
         _ _ block = .ok fgen →
       ∀ f ∈ fgen.toArray, ∀ ty ∈ f.output :: f.inputs.values,
         LMonoTy.knownInstance ty C'.knownTypes = true := by
   intro fgen hfgen
   have h' := h
   obtain ⟨-, ds, fgen', fs, ks, hds, hfgen', hfs, hks, rfl⟩ :=
-    @LContext.addMutualBlock_ok_eq CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+    @LContext.addMutualBlock_ok_eq CoreLParams _ instInhabitedPUnit _
       _ C _ block h
   obtain rfl : fgen = fgen' := Except.ok.inj (hfgen.symm.trans hfgen')
   simp only [Lambda.Factory.addFactory, Lambda.Factory.tryAddAll] at hfs
@@ -2024,7 +2038,7 @@ theorem genBlockFactory_sigsKnown_of_addMutualBlock {C C' : LContext CoreLParams
   obtain ⟨fs₀, hfs₀⟩ := foldlM_tryPush_ok_of_names_sub _ C.functions Lambda.Factory.default fs
     (fun name hname => absurd hname (Lambda.Factory.default_empty name)) hfs
   -- The same registration with an empty function table.
-  have h₀ : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+  have h₀ : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit _
       _ { C with functions := Lambda.Factory.default } block =
       .ok { C with datatypes := ds, functions := fs₀, knownTypes := ks } := by
     simp only [LContext.addMutualBlock, bind, Except.bind] at h' ⊢
@@ -2063,14 +2077,14 @@ structure BlockFunctionsAdded (C C' : LContext CoreLParams) (block : MutualDatat
     `bool` and each of its datatypes, adds exactly the block's derived functions. -/
 theorem blockFunctionsAdded_of_addMutualBlock {C C' : LContext CoreLParams}
     {block : MutualDatatype Unit}
-    (h : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+    (h : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit _
       _ C block = .ok C')
     (hdk : C.DatatypesKnown)
     (harrow : C.knownTypes["arrow"]? = some 2) (hbool : C.knownTypes["bool"]? = some 0) :
     ∃ F, BlockFunctionsAdded C C' block F := by
   have hsigs := genBlockFactory_sigsKnown_of_addMutualBlock h hdk harrow hbool
   obtain ⟨-, ds, fgen, fs, ks, hds, hfgen, hfs, hks, rfl⟩ :=
-    @LContext.addMutualBlock_ok_eq CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+    @LContext.addMutualBlock_ok_eq CoreLParams _ instInhabitedPUnit _
       _ C _ block h
   have hdec := TypeFactory.addMutualBlock_ok_inv _ _ block _ hds
   simp only [Lambda.Factory.addFactory, Lambda.Factory.tryAddAll] at hfs
@@ -2078,7 +2092,7 @@ theorem blockFunctionsAdded_of_addMutualBlock {C C' : LContext CoreLParams}
   obtain ⟨hold, hnew, hall⟩ := foldlM_tryPush_lookup _ C.functions fs hfs
   refine ⟨fgen,
     { derived := ?_
-      wf := @genBlockFactory_wf CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+      wf := @genBlockFactory_wf CoreLParams _ instInhabitedPUnit _
         _ block fgen hdec.1 hdec.2.2.1 hfgen
       sigsKnown := hsigs fgen hfgen
       preserves_old := hold
@@ -2298,6 +2312,7 @@ theorem inv_initState : Inv initState := by
         simp [initState, programContext, DatatypeGen.coreContext, TypeFactory.allDatatypes] at hd
       octxWK := coreMonoOps_wellKinded
       sigsWK := by intro sig hsig; simp [initState] at hsig
+      sigsTyVars := by intro sig hsig; simp [initState] at hsig
       exprCtx := ?_
       polysClosed := ?_ }
   · -- `ContextOk` reads the known types and datatypes only, where `programContext` and

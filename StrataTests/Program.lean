@@ -42,16 +42,11 @@ def programChecks : List TestDecl :=
       ("program: getNames of a well-typed program are distinct",
        fun gp => checkProgramNamesNodup gp.prog),
       ("program: typeCheck output re-typechecks",
-       fun gp => checkProgramTypeCheckIdempotent gp.prog,
-       .knownFailure "Core's `Program.typeCheck` rejects its own output for a polymorphic \
-         procedure with an inout parameter of its type variable; the same defect as the \
-         witness `program: a polymorphic procedure with an inout parameter re-typechecks`"),
+       fun gp => checkProgramTypeCheckIdempotent gp.prog),
       ("program: stripMetaData preserves typeability",
        fun gp => checkProgramStripMetaPreservesTyping gp.prog),
       ("program: eraseTypes preserves typeability",
-       fun gp => checkProgramEraseTypesPreservesTyping gp.prog,
-       .knownFailure "an axiom such as `Sequence.select!(Sequence.empty<bool>(), …)` no longer \
-         typechecks after `eraseTypes`; failed on both full runs of 2026-11-11; not yet triaged") ]
+       fun gp => checkProgramEraseTypesPreservesTyping gp.prog) ]
 
 /-- The four claims that hold only *across* declarations. No shape of a smaller generator can
     state them.
@@ -72,19 +67,18 @@ def programADTProps : List TestDecl :=
       ("program: ADT calls follow the datatype declaration",
        fun gp => checkDerivedCallsFollowDeclaration gp.prog) ]
 
-/-- The whole-program shrinker's checks that need a checker stricter than Core's
-    `Program.typeCheck`. -/
+/-- The whole-program shrinker's checks. The check for a datatype block with a reserved tester
+    name needs a checker stricter than Core's `Program.typeCheck`. -/
 @[strata_properties]
-def programShrinkStrictChecks : List TestDecl :=
-  strictCheckerShrinkChecks.map fun (name, verdict) =>
-    knownFailure "needs a checker that rejects this program; Core's `Program.typeCheck` \
-      accepts it" (TestDecl.witness name verdict)
+def programShrinkChecks : List TestDecl :=
+  (rejectedProgramShrinkChecks ++ renamedTyArgShrinkChecks).map (fun (name, verdict) =>
+    TestDecl.witness name verdict) ++
+  [ knownFailure "needs a checker that rejects this program; Core's `Program.typeCheck` \
+      accepts it" (TestDecl.witness reservedTesterShrinkCheck.1 reservedTesterShrinkCheck.2) ]
 
 /-- A hand-built witness for the sampled property `program: typeCheck output re-typechecks`,
     which a draw falsifies only sometimes. -/
 @[strata_property]
 def programPolyInoutRetypechecks : TestDecl :=
-  knownFailure "Core's `Program.typeCheck` rejects its own output for a polymorphic \
-    procedure with an inout parameter of its type variable" <|
-    TestDecl.witness "program: a polymorphic procedure with an inout parameter re-typechecks"
-      polyInoutProcRetypechecks
+  TestDecl.witness "program: a polymorphic procedure with an inout parameter re-typechecks"
+    polyInoutProcRetypechecks

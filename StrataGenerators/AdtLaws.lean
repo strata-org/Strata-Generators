@@ -154,7 +154,7 @@ def groundFieldTys (d : LDatatype Unit) (c : LConstr Unit) : List LMonoTy :=
       `genConstructorsForAllTypes` also changes the shape that the soundness proofs in
       `DatatypeGenProofs` use, so that change is later work. -/
 def blockAccepted (block : MutualDatatype Unit) : Bool :=
-  match @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+  match @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit _
       _ DatatypeGen.coreContext block with
   | .ok _ => true
   | .error _ => false
@@ -265,7 +265,7 @@ def blockIsSmtSafe (block : MutualDatatype Unit) : Bool :=
 /-! ## How the module builds the assertion program -/
 
 /-- A free variable at a known type. -/
-private def fv (n : String) (τ : LMonoTy) : Expression.Expr := .fvar () ⟨n, ()⟩ (some τ)
+private def fv (n : String) (τ : LMonoTy) : Expression.Expr := .fvar genLoc ⟨n, ()⟩ (some τ)
 
 /-- `f a₁ … a_n` for an operator `f` that the factory names. Here `f` is always a datatype
     constructor, and `genBlockFactory` inside `addMutualBlock` registered it. The type
@@ -273,7 +273,7 @@ private def fv (n : String) (τ : LMonoTy) : Expression.Expr := .fvar () ⟨n, (
     receives the application holds the ground result type. `letDecl` builds that binding, and
     the ground type is what gives the type parameters of the constructor their values. -/
 private def opApp (name : String) (args : List Expression.Expr) : Expression.Expr :=
-  args.foldl (fun acc a => .app () acc a) (.op () ⟨name, ()⟩ none)
+  args.foldl (fun acc a => .app genLoc acc a) (.op genLoc ⟨name, ()⟩ none)
 
 /-- `var n : τ;`, which is a local with no initial value. It is the universally quantified
     variable of a law. Symbolic evaluation gives such a local a symbolic value with no
@@ -344,9 +344,9 @@ def injObligation (block : MutualDatatype Unit) (di : Nat) (d : LDatatype Unit)
     let decls :=
       (xs ++ ys).map (fun (n, τ) => varDecl n τ)
       ++ [ letDecl u dτ (mkApp xs), letDecl v dτ (mkApp ys),
-           assumeSt s!"inj_{di}_{ci}_h" (.eq () (fv u dτ) (fv v dτ)) ]
+           assumeSt s!"inj_{di}_{ci}_h" (.eq genLoc (fv u dτ) (fv v dτ)) ]
       ++ (labels.zip (xs.zip ys)).map (fun (l, (x, y)) =>
-            assertSt l (.eq () (fv x.1 x.2) (fv y.1 y.2)))
+            assertSt l (.eq genLoc (fv x.1 x.2) (fv y.1 y.2)))
     some (lawProc s!"inj_{di}_{ci}" decls, labels)
 
 /-- The obligation for disjointness of the pair of constructors `(c₁, c₂)`, at the indices
@@ -375,7 +375,7 @@ def disjObligation (block : MutualDatatype Unit) (di : Nat) (d : LDatatype Unit)
   let body :=
     (xs ++ ys).map (fun (n, τ) => varDecl n τ)
     ++ [ letDecl u dτ (mkApp c1.name.name xs), letDecl v dτ (mkApp c2.name.name ys),
-         assertSt label (opApp "Bool.Not" [.eq () (fv u dτ) (fv v dτ)]) ]
+         assertSt label (opApp "Bool.Not" [.eq genLoc (fv u dτ) (fv v dτ)]) ]
   (lawProc s!"disj_{di}_{c1i}_{c2i}" body, label)
 
 /-- The **tester form** of disjointness: for a symbolic `u : d`, no two different testers hold
@@ -630,8 +630,8 @@ def checkDisjFoldsDuringSymEval (block : MutualDatatype Unit) : Bool :=
   | some sp =>
     (programAsserts sp).all fun (l, e) =>
       match LawKind.ofLabel l with
-      | some .disjApp => e == .const () (.boolConst true)
-      | some .disjTester => e != .const () (.boolConst true)
+      | some .disjApp => e == .const genLoc (.boolConst true)
+      | some .disjTester => e != .const genLoc (.boolConst true)
       | _ => true
 
 /-! ## The witness blocks for the two defects of the SMT encoder

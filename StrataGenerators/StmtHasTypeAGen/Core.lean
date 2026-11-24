@@ -4,7 +4,7 @@ import Basalt.Combinators
 import StrataGenerators.BasaltCompat.Defs
 import Basalt.Tuning.Attr
 import BasaltExamples.ArbString.Def
-import Strata.Languages.Core.StatementTypeSpec
+import Strata.Languages.Core.Typing.Spec.StatementTypeSpec
 import StrataGenerators.CmdHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen.Core
 import StrataGenerators.StmtHasTypeAGen.CallDefs
@@ -198,7 +198,7 @@ def genCmdStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
     (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat)
     (pctx : PolyOpCtx := []) : G GenStmtResult := do
-  let r ← genCmd octx tvars immutableVars ctx depth pctx [] C.knownTypes
+  let r ← genCmd octx tvars immutableVars ctx depth pctx (functionNames C) C.knownTypes
   pure ⟨[Stmt.cmd (CmdExt.cmd r.cmd)], C, r.outCtx⟩
 
 /-- Generate an `exit` statement that targets a block around it. The typing rule
@@ -349,6 +349,7 @@ def genCallTail [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
         let mask ← listOf (elements [true, false] (by simp))
         let theCall :=
           Statement.call s.pname
+            (callTyArgs s.typeArgs σ)
             (StrataGenerators.Stmt.mkArgs s.M outTargets exprs mask) default
         -- The `init`s (possibly none) then the call, inline in the ambient scope.
         pure ⟨StrataGenerators.Stmt.initChain toInit ++ [theCall], C,
@@ -358,10 +359,16 @@ def genCallTail [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
   else
     default
 
-/-- Draw one monotype from the generable types `generableTys`, or `.bool` when there are none. -/
-def sampleTyArg [Gen G] (generableTys : List LMonoTy) : G LMonoTy :=
-  if hg : generableTys.length > 0 then
-    elements generableTys (by apply List.ne_nil_of_length_pos; assumption)
+/-- Whether every type variable of `t` is one of `tvars`. -/
+def tyVarsWithin (tvars : List TyIdentifier) (t : LMonoTy) : Bool :=
+  t.freeVars.all (tvars.contains ·)
+
+/-- Draw one monotype from the generable types `generableTys` whose type variables are all in
+    `tvars`, or `.bool` when there are none. -/
+def sampleTyArg [Gen G] (tvars : List TyIdentifier) (generableTys : List LMonoTy) : G LMonoTy :=
+  let bound := generableTys.filter (tyVarsWithin tvars)
+  if hg : bound.length > 0 then
+    elements bound (by apply List.ne_nil_of_length_pos; assumption)
   else pure .bool
 
 /-- Generate a procedure-call statement targeting one of the callable procedures
@@ -443,11 +450,12 @@ def genCallStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     -- Step 2. Instantiate the type parameters of the callee. The signature of a polymorphic
     -- callee is over its own type parameters, and the call rule permits each concrete
     -- instantiation. The generator therefore samples one monotype for each type parameter, from
-    -- the generable types, as `genIndirPoly` samples a type for polymorphic factory functions,
-    -- and then instantiates the three signature blocks by `σ`. A monomorphic callee
-    -- (`s.typeArgs = []`) gives `σ = []`, and `substSig [] = id`.
+    -- the generable types whose type variables are type parameters of the caller, as
+    -- `genIndirPoly` samples a type for polymorphic factory functions, and then instantiates the
+    -- three signature blocks by `σ`. A monomorphic callee (`s.typeArgs = []`) gives `σ = []`, and
+    -- `substSig [] = id`.
     let generableTys := generableTypesFromCtx ctx.values [] octx
-    let σvals ← s.typeArgs.mapM (fun _ => sampleTyArg generableTys)
+    let σvals ← s.typeArgs.mapM (fun _ => sampleTyArg tvars generableTys)
     let σ : List (TyIdentifier × LMonoTy) := s.typeArgs.zip σvals
     -- Step 3. The callee fixes the name of each in-out argument and the instantiation fixes each
     -- type. The out targets are chosen for the instantiated output-only block, by `outTargets`.
@@ -504,13 +512,14 @@ def matchRenaming (octx : OpCtx) (tvars : List TyIdentifier) (ctx : VarCtx) (s :
     List (TyIdentifier × LMonoTy) :=
   s.typeArgs.zip ((matchFreshArgs octx tvars ctx s).map LMonoTy.ftvar)
 
-/-- The instantiation of one (renamed) type parameter `f`: the type that the first unifier binds to
-    `f`, and otherwise a type that `sampleTyArg` draws. -/
-def matchedTyArg [Gen G] (generableTys : List LMonoTy) (substs : List Lambda.Subst)
-    (f : TyIdentifier) : G LMonoTy :=
+/-- The instantiation of one (renamed) type parameter `f`: the type that the first unifier binds
+    to `f` when its type variables are all in `tvars`, and otherwise a type that `sampleTyArg`
+    draws. -/
+def matchedTyArg [Gen G] (tvars : List TyIdentifier) (generableTys : List LMonoTy)
+    (substs : List Lambda.Subst) (f : TyIdentifier) : G LMonoTy :=
   match substs.findSome? (fun sb => Strata.Util.HMaps.find? sb f) with
-  | some t => pure t
-  | none => sampleTyArg generableTys
+  | some t => if tyVarsWithin tvars t then pure t else sampleTyArg tvars generableTys
+  | none => sampleTyArg tvars generableTys
 
 /-- The out arguments of a call, given the instantiated output-only formals `Oσ` and the chosen
     targets: a chosen caller variable keeps its name, and a new name is `freshOut base i`.
@@ -544,7 +553,7 @@ def targetsMatched (Oσ : @LMonoTySignature Unit)
        with `t`, and fail when the unifier binds a type variable of `t` (`matchTargets`). A failed
        match gives the empty generator.
     3. **Sampling.** Draw a type only for each type parameter that the matches leave unbound, from
-       the generable types (and `.bool` when there are none).
+       the generable types whose type variables are in `tvars` (and `.bool` when there are none).
     4. **Assembly.** Instantiate the three signature blocks, and generate the inputs at the
        instantiated types, exactly as `genCallStmt` does (`genCallTail`). The call is kept only
        under the guards of `genCallStmt`, and when each instantiated formal type equals the type of
@@ -576,7 +585,7 @@ def genCallStmtMatch [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     | some substs =>
       -- Step 3: the bound type parameters take their match, and the others are sampled.
       let σvals ← (matchFreshArgs octx tvars ctx s).mapM
-        (matchedTyArg (generableTypesFromCtx ctx.values [] octx) substs)
+        (matchedTyArg tvars (generableTypesFromCtx ctx.values [] octx) substs)
       let σ : List (TyIdentifier × LMonoTy) := s.typeArgs.zip σvals
       let Oσ := StrataGenerators.Stmt.substSig σ s.O
       -- Each matched formal must have exactly the type of its variable after the instantiation.

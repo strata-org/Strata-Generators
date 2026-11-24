@@ -1,4 +1,5 @@
 import StrataGenerators.StmtHasTypeAGenComplete
+import Strata.Languages.Core.ProcedureProps
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec ArbString
 open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
@@ -7,8 +8,9 @@ open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
 # Completeness of `genStmt` and `genStmtChain` with an existential size and body-length cap
 
 `spec_complete_at` is stated at a fixed size `n` and a fixed body-length cap `k`, and its side
-conditions `AlphabetOk`, `CallOk` and `ExprOk` mention both. This module states completeness with
-side conditions that mention neither:
+conditions `AlphabetOk`, `CallOk` and `ExprOk` mention both. Its premise `StatementNamesWF` (no
+variable named like a function and no local type named like a declaration of the program) mentions
+neither. This module states completeness with side conditions that mention neither:
 
 * `spec_complete`: a well-typed statement that meets the size-free side conditions is in the support
   of `genStmt … n k` for *some* `n` and `k`.
@@ -115,7 +117,7 @@ def AlphabetOkE (tvars : List TyIdentifier) : Statement → Prop
   | .cmd (CmdExt.cmd (.assert l _ _)) => l ∈ SPMF.support (genIdentName (G := SPMF))
   | .cmd (CmdExt.cmd (.assume l _ _)) => l ∈ SPMF.support (genIdentName (G := SPMF))
   | .cmd (CmdExt.cmd (.cover l _ _)) => l ∈ SPMF.support (genIdentName (G := SPMF))
-  | .cmd (CmdExt.call _ _ _) => True
+  | .cmd (CmdExt.call _ _ _ _) => True
   | .block label body _ =>
       label ∈ SPMF.support (genIdentName (G := SPMF)) ∧ AlphabetOkEList tvars body
   | .ite _ t e _ => AlphabetOkEList tvars t ∧ AlphabetOkEList tvars e
@@ -167,7 +169,7 @@ theorem alphabetOkE_eventually : ∀ (s : Statement), AlphabetOkE tvars s → Al
     ⟨0, .of_forall fun _ _ _ => by simpa [AlphabetOk, AlphabetOkE] using h⟩
   | .cmd (CmdExt.cmd (.cover _ _ _)), h =>
     ⟨0, .of_forall fun _ _ _ => by simpa [AlphabetOk, AlphabetOkE] using h⟩
-  | .cmd (CmdExt.call _ _ _), _ => ⟨0, .of_forall fun _ _ _ => by simp [AlphabetOk]⟩
+  | .cmd (CmdExt.call _ _ _ _), _ => ⟨0, .of_forall fun _ _ _ => by simp [AlphabetOk]⟩
   | .block _ body _, ⟨hl, hb⟩ => by
     obtain ⟨K, N, h⟩ := (alphabetOkEList_eventually body hb).nested
     refine ⟨K, N + 1, fun n hn k hk => ?_⟩
@@ -218,7 +220,7 @@ mutual
     nested body is checked in its own scope only. -/
 def ExprOkE (ctx : VarCtx) : Statement → Prop
   | .cmd (CmdExt.cmd c) => CmdExprOkE (octx := octx) (tvars := tvars) (pctx := pctx) ctx c
-  | .cmd (CmdExt.call _ _ _) => True
+  | .cmd (CmdExt.call _ _ _ _) => True
   | .block _ body _ => ExprOkEList ctx body
   | .ite cond t e _ =>
       (∀ g, cond = .det g → ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx .bool g) ∧
@@ -276,7 +278,7 @@ theorem exprOkE_eventually : ∀ (ctx : VarCtx) (s : Statement),
     ExprOkE (octx := octx) (tvars := tvars) (pctx := pctx) ctx s →
       Eventually fun n => ExprOk (octx := octx) (tvars := tvars) (pctx := pctx) ctx n s
   | ctx, .cmd (CmdExt.cmd c), h => cmdExprOkE_eventually ctx c h
-  | _, .cmd (CmdExt.call _ _ _), _ => .of_forall fun _ => trivial
+  | _, .cmd (CmdExt.call _ _ _ _), _ => .of_forall fun _ => trivial
   | ctx, .block _ body _, h => (exprOkEList_eventually ctx body h).pred
   | ctx, .ite cond t e _, ⟨hg, ht, he⟩ =>
     ((guard_eventually cond hg).and ((exprOkEList_eventually ctx t ht).pred.and
@@ -296,26 +298,136 @@ theorem exprOkEList_eventually : ∀ (ctx : VarCtx) (ss : List Statement),
     (exprOkE_eventually ctx s hs).and (exprOkEList_eventually (stepCtx ctx s) ss hss)
 end
 
+-- ── The sampler clause of a call follows from the typing of the procedure ───
+
+/-- A list of types that each come from `gt` (or are `bool` when `gt` is empty) and have their type
+    variables in `tvars` is a draw of one `sampleTyArg tvars gt` for each type parameter. -/
+theorem mem_support_mapM_sampleTyArg (typeArgs : List TyIdentifier) (gt : List LMonoTy) :
+    ∀ σvals : List LMonoTy, σvals.length = typeArgs.length →
+      (∀ t ∈ σvals, t ∈ gt ∨ (gt = [] ∧ t = .bool)) →
+      (∀ t ∈ σvals, tyVarsWithin tvars t = true) →
+      σvals ∈ SPMF.support
+        (typeArgs.mapM (fun _ => sampleTyArg tvars gt) : SPMF (List LMonoTy)) := by
+  have hone : ∀ t, (t ∈ gt ∨ (gt = [] ∧ t = .bool)) → tyVarsWithin tvars t = true →
+      t ∈ SPMF.support (sampleTyArg (G := SPMF) tvars gt) := by
+    intro t hgen hb
+    unfold sampleTyArg
+    dsimp only
+    split
+    · rename_i hpos
+      rw [mem_support_elements_iff]
+      rcases hgen with hin | ⟨hnil, _⟩
+      · exact List.mem_filter.mpr ⟨hin, hb⟩
+      · subst hnil
+        simp only [List.filter_nil, List.length_nil, gt_iff_lt, lt_self_iff_false] at hpos
+    · rename_i hneg
+      rw [mem_support_pure_iff]
+      rcases hgen with hin | ⟨_, hbool⟩
+      · exact absurd (List.length_pos_of_mem (List.mem_filter.mpr ⟨hin, hb⟩)) hneg
+      · exact hbool
+  induction typeArgs with
+  | nil =>
+    intro σvals hlen _ _
+    cases σvals with
+    | nil => simp only [List.mapM_nil, mem_support_pure_iff]
+    | cons _ _ => simp only [List.length_cons, List.length_nil] at hlen; omega
+  | cons a rest ih =>
+    intro σvals hlen hgen hb
+    cases σvals with
+    | nil => simp only [List.length_nil, List.length_cons] at hlen; omega
+    | cons t ts =>
+      rw [mem_support_mapM_iff]
+      refine List.Forall₂.cons (hone t (hgen t List.mem_cons_self) (hb t List.mem_cons_self)) ?_
+      rw [← mem_support_mapM_iff]
+      have hlen' : ts.length = rest.length := by
+        simp only [List.length_cons, Nat.add_right_cancel_iff] at hlen
+        exact hlen
+      exact ih ts hlen'
+        (fun u hu => hgen u (List.mem_cons_of_mem _ hu))
+        (fun u hu => hb u (List.mem_cons_of_mem _ hu))
+
+/-- When the callee's type parameters are distinct, each instantiation value of a call is a type
+    argument that the call stores, so a bound on the stored type arguments bounds the values. -/
+theorem call_instantiation_tyVarsWithin (calleeTypeArgs : List TyIdentifier)
+    (σvals : List LMonoTy) (hnd : calleeTypeArgs.Nodup)
+    (hlen : σvals.length = calleeTypeArgs.length) {pname : String}
+    {args : List (CallArg Expression)} {md : Imperative.MetaData Expression}
+    (hbound : ∀ v ∈ cmdCollect (fun _ => []) LMonoTy.freeVars
+      (CmdExt.call pname (callTyArgs calleeTypeArgs (calleeTypeArgs.zip σvals)) args md),
+      v ∈ tvars) :
+    ∀ t ∈ σvals, tyVarsWithin tvars t = true := by
+  intro t ht
+  have hsnd : (calleeTypeArgs.zip σvals).map Prod.snd = σvals :=
+    List.map_snd_zip (Nat.le_of_eq hlen)
+  have htmem : t ∈ (calleeTypeArgs.zip σvals).map Prod.snd := by
+    rw [hsnd]
+    exact ht
+  obtain ⟨⟨a, t'⟩, haz, hsnd'⟩ := List.mem_map.mp htmem
+  have hteq : t = t' := hsnd'.symm
+  subst hteq
+  have hfind : Strata.Util.HMaps.find?
+      (Strata.Util.HMaps.ofScopes [calleeTypeArgs.zip σvals]) a = some t :=
+    Subst.find?_ofZip_of_mem_zip hnd haz
+  have hsubst : LMonoTy.subst (Strata.Util.HMaps.ofScopes [calleeTypeArgs.zip σvals])
+      (.ftvar a) = t := by
+    rw [LMonoTy.subst_unfold]
+    dsimp only
+    rw [hfind]
+  unfold tyVarsWithin
+  refine List.all_eq_true.mpr fun v hv => List.contains_iff_mem.mpr (hbound v ?_)
+  simp only [cmdCollect, CmdExt.initTypes, Statement.cmdTyArgs, Statement.cmdExprs,
+    List.flatMap_nil, List.nil_append, flatMap_const_nil, List.append_nil, callTyArgs,
+    Option.getD_some, List.mem_flatMap, List.mem_map]
+  have hvt : v ∈ (LMonoTy.subst (Strata.Util.HMaps.ofScopes [calleeTypeArgs.zip σvals])
+      (.ftvar a)).freeVars := by
+    rw [hsubst]
+    exact hv
+  exact ⟨_, ⟨a, (List.of_mem_zip haz).1, rfl⟩, hvt⟩
+
+/-- A call in the body of a well-typed procedure whose instantiation values are generable (drawn
+    from `gt`, or `bool` when `gt` is empty) meets the sampler clause over its type parameters. -/
+theorem call_sampler_of_procWellTyped {P : Program} {C : LContext CoreLParams} {ts : TypeScopes}
+    {proc : Procedure} (hproc : ProcWellTyped P C ts proc) {ss : List Statement}
+    (hbody : proc.body = .structured ss) (calleeTypeArgs : List TyIdentifier)
+    (σvals : List LMonoTy) (gt : List LMonoTy) (hnd : calleeTypeArgs.Nodup)
+    (hlen : σvals.length = calleeTypeArgs.length) {pname : String}
+    {args : List (CallArg Expression)} {md : Imperative.MetaData Expression}
+    (hcall : CmdExt.call pname (callTyArgs calleeTypeArgs (calleeTypeArgs.zip σvals)) args md ∈
+      stmtsCmds ss)
+    (hgen : ∀ t ∈ σvals, t ∈ gt ∨ (gt = [] ∧ t = .bool)) :
+    σvals ∈ SPMF.support
+      (calleeTypeArgs.mapM (fun _ => sampleTyArg proc.header.typeArgs gt) :
+        SPMF (List LMonoTy)) := by
+  have hbound : ∀ v ∈ cmdCollect (fun _ => []) LMonoTy.freeVars
+      (CmdExt.call pname (callTyArgs calleeTypeArgs (calleeTypeArgs.zip σvals)) args md),
+      v ∈ proc.header.typeArgs := by
+    intro v hv
+    refine hproc.declTyVarsBound v ?_
+    rw [Procedure.bodyCollect_noExprs_eq_cmds, hbody, List.mem_flatMap]
+    exact ⟨_, hcall, hv⟩
+  have hvars := call_instantiation_tyVarsWithin (tvars := proc.header.typeArgs) calleeTypeArgs
+    σvals hnd hlen hbound
+  exact mem_support_mapM_sampleTyArg calleeTypeArgs gt σvals hlen hgen hvars
+
 -- ── The size-free call condition ────────────────────────────────────────────
 
 mutual
 /-- `CallOk` with `ExprReach` in place of reachability at one depth for the by-value inputs. Every
     other clause of the call recipe is unchanged. -/
 def CallOkE (imm : List (Identifier Unit)) (procs : ProcSigCtx) (ctx : VarCtx) : Statement → Prop
-  | .cmd (CmdExt.call pname args _) =>
+  | .cmd (CmdExt.call pname tyArgs args _) =>
       ∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr)
         (mask : List Bool),
         s ∈ procs ∧
         s.pname = pname ∧
         σvals ∈ SPMF.support
           (s.typeArgs.mapM (fun _ =>
-            if hg : (generableTypesFromCtx ctx.values [] octx).length > 0 then
-              elements (generableTypesFromCtx ctx.values [] octx)
-                (by apply List.ne_nil_of_length_pos; assumption)
-            else pure (.bool : LMonoTy)) : SPMF (List LMonoTy)) ∧
+            sampleTyArg tvars (generableTypesFromCtx ctx.values [] octx)) :
+            SPMF (List LMonoTy)) ∧
         args = StrataGenerators.Stmt.mkArgs s.M
           (outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
           exprs mask ∧
+        tyArgs = callTyArgs s.typeArgs (s.typeArgs.zip σvals) ∧
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).all (usableName imm ctx) = true ∧
         List.Forall₂ (fun e τ => ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx τ e)
           exprs (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.I).values
@@ -337,8 +449,8 @@ theorem callOkE_eventually (imm : List (Identifier Unit)) (procs : ProcSigCtx) :
     ∀ (ctx : VarCtx) (s : Statement),
       CallOkE (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx s →
       Eventually fun n => CallOk (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx n s
-  | _, .cmd (CmdExt.call _ _ _), ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h₆⟩ =>
-    (Eventually.forall₂ h₆).mono fun _ h => ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h⟩
+  | _, .cmd (CmdExt.call _ _ _ _), ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h₆, h₇⟩ =>
+    (Eventually.forall₂ h₇).mono fun _ h => ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h₆, h⟩
   | _, .cmd (CmdExt.cmd _), _ => .of_forall fun _ => trivial
   | ctx, .block _ body _, h => (callOkEList_eventually imm procs ctx body h).pred
   | ctx, .ite _ t e _, ⟨ht, he⟩ =>
@@ -359,8 +471,9 @@ end
 -- ── Statement chains at a fixed size and cap ────────────────────────────────
 
 /-- `spec_complete_at` for a statement chain, at a fixed size `n` and cap `k`: each statement of a
-    well-typed chain meets the side conditions, so the chain is in `genStmtChain`'s support at its own
-    length. -/
+    well-typed chain meets the side conditions and `StatementsNamesWF` (no variable named like a
+    function and no local type named like a declaration of `P`), so the chain is in
+    `genStmtChain`'s support at its own length. -/
 theorem spec_complete_chain_at (P : Program) (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     (k : Nat) :
     ∀ (ss : List Statement) (C : LContext CoreLParams) (ts : TypeScopes) (L : List String)
@@ -369,22 +482,23 @@ theorem spec_complete_chain_at (P : Program) (imm : List (Identifier Unit)) (pro
       InGenShapeList ss → WritesOkList imm ss → AlphabetOkList tvars k n ss →
       CallOkList (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx n ss →
       ExprOkList (octx := octx) (tvars := tvars) (pctx := pctx) ctx n ss →
+      StatementsNamesWF P (fun x => x ∈ C.functions) ss →
       ∃ ctx', Strata.Util.HMaps.Equiv ts' (procToTCtx ctx').types ∧ ctx' = stepCtxList ctx ss ∧
         ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
           SPMF.support (genStmtChain (G := SPMF) octx tvars imm procs L C ctx pctx n ss.length k)
-  | [], C, _, _, _, _, hss, ctx, n, hΓ, _, _, _, _, _ => by
+  | [], C, _, _, _, _, hss, ctx, n, hΓ, _, _, _, _, _, _ => by
     cases hss with
     | nil _ _ _ _ hequiv => exact ⟨ctx, hequiv.trans hΓ, rfl, genStmtChain_nil_mem procs C ctx n⟩
   | s :: ss, C, ts, L, C', ts', hss, ctx, n, hΓ, ⟨hnf, hnfs⟩, ⟨hwr, hwrs⟩, ⟨hok, hoks⟩,
-      ⟨hcall, hcalls⟩, ⟨hexpr, hexprs⟩ => by
+      ⟨hcall, hcalls⟩, ⟨hexpr, hexprs⟩, hnm => by
     cases hss with
     | cons _ C₁ _ _ ts₁ _ _ _ _ hs hss =>
       obtain ⟨ctx₁, hctx₁, rfl, hsmem⟩ :=
         spec_complete_at (maxStmtSeqLen := k) P imm procs C ts L s C₁ ts₁ hs ctx n hΓ hnf hwr hok
-          hcall hexpr
+          hcall hexpr hnm.1
       obtain ⟨ctx₂, hctx₂, hstep, hssmem⟩ :=
         spec_complete_chain_at P imm procs k ss C₁ ts₁ L C' ts' hss (stepCtx ctx s) n hctx₁ hnfs hwrs
-          hoks hcalls hexprs
+          hoks hcalls hexprs (statementsNamesWF_tail hs hnm)
       refine ⟨ctx₂, hctx₂, by rw [hstep]; rfl, ?_⟩
       simpa using genStmtChain_cons_mem procs C ctx n ss.length ⟨[s], C₁, stepCtx ctx s⟩ ss C'
         ctx₂ hsmem hssmem
@@ -394,14 +508,17 @@ theorem spec_complete_chain_at (P : Program) (imm : List (Identifier Unit)) (pro
 /-- **Completeness of `genStmtChain`, at every large enough size and cap.** A well-typed chain that
     meets the size-free side conditions is in `genStmtChain`'s support at its own length, at every
     cap `k ≥ K` and every size `n` from some threshold on. This is the form a caller that fixes the
-    size and the cap for other reasons, such as a procedure, uses. -/
+    size and the cap for other reasons, such as a procedure, uses. The chain also meets
+    `StatementsNamesWF`: no variable named like a function of `C` and no local type named like a
+    declaration of `P`. -/
 theorem spec_complete_chain_ev (P : Program) (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     (ss : List Statement) (C : LContext CoreLParams) (ts : TypeScopes) (L : List String)
     (C' : LContext CoreLParams) (ts' : TypeScopes) (hss : StatementsWellTyped P C ts L ss C' ts')
     (ctx : VarCtx) (hΓ : Strata.Util.HMaps.Equiv ts (procToTCtx ctx).types)
     (hshape : InGenShapeList ss) (hwr : WritesOkList imm ss) (hok : AlphabetOkEList tvars ss)
     (hcall : CallOkEList (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx ss)
-    (hexpr : ExprOkEList (octx := octx) (tvars := tvars) (pctx := pctx) ctx ss) :
+    (hexpr : ExprOkEList (octx := octx) (tvars := tvars) (pctx := pctx) ctx ss)
+    (hnames : StatementsNamesWF P (fun x => x ∈ C.functions) ss) :
     ∃ K, Eventually fun n => ∀ k, K ≤ k →
       ∃ ctx', Strata.Util.HMaps.Equiv ts' (procToTCtx ctx').types ∧ ctx' = stepCtxList ctx ss ∧
         ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
@@ -409,14 +526,17 @@ theorem spec_complete_chain_ev (P : Program) (imm : List (Identifier Unit)) (pro
   obtain ⟨K, ha⟩ := alphabetOkEList_eventually ss hok
   exact ⟨K, (ha.and ((callOkEList_eventually imm procs ctx ss hcall).and
     (exprOkEList_eventually ctx ss hexpr))).mono fun n ⟨hA, hC, hE⟩ k hk =>
-      spec_complete_chain_at P imm procs k ss C ts L C' ts' hss ctx n hΓ hshape hwr (hA k hk) hC hE⟩
+      spec_complete_chain_at P imm procs k ss C ts L C' ts' hss ctx n hΓ hshape hwr (hA k hk) hC hE
+        hnames⟩
 
 /-- **Completeness of `genStmt`, for some size and some body-length cap.** Every well-typed
     statement in generator shape (`InGenShape`) that writes no immutable variable (`WritesOk`) and
     whose names, `init` types, call recipes and expressions meet the size-free conditions
     `AlphabetOkE`, `CallOkE` and `ExprOkE` is in the support of `genStmt … n k` for some size `n` and
     some cap `k`, with an output scope equivalent to the typing's. None of the side conditions
-    mentions a size or a cap. -/
+    mentions a size or a cap. The statement also meets
+    `StatementNamesWF`: no variable named like a function of `C` and no local type named like a
+    declaration of `P`, which `ProgramNamesWF` requires of every program. -/
 theorem spec_complete (P : Program) (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (ts : TypeScopes) (labels : List String)
     (s : Statement) (C' : LContext CoreLParams) (ts' : TypeScopes)
@@ -424,7 +544,8 @@ theorem spec_complete (P : Program) (imm : List (Identifier Unit)) (procs : Proc
     (hΓ : Strata.Util.HMaps.Equiv ts (procToTCtx ctx).types)
     (hshape : InGenShape s) (hwr : WritesOk imm s) (hok : AlphabetOkE tvars s)
     (hcall : CallOkE (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx s)
-    (hexpr : ExprOkE (octx := octx) (tvars := tvars) (pctx := pctx) ctx s) :
+    (hexpr : ExprOkE (octx := octx) (tvars := tvars) (pctx := pctx) ctx s)
+    (hnames : StatementNamesWF P (fun x => x ∈ C.functions) s) :
     ∃ k n ctx', Strata.Util.HMaps.Equiv ts' (procToTCtx ctx').types ∧
       ctx' = stepCtx ctx s ∧
       (⟨[s], C', ctx'⟩ : GenStmtResult) ∈
@@ -434,6 +555,6 @@ theorem spec_complete (P : Program) (imm : List (Identifier Unit)) (procs : Proc
     (exprOkE_eventually ctx s hexpr)))
   obtain ⟨hA, hC, hE⟩ := hN N le_rfl
   exact ⟨K, N, spec_complete_at (maxStmtSeqLen := K) P imm procs C ts labels s C' ts' h ctx N hΓ
-    hshape hwr (hA K le_rfl) hC hE⟩
+    hshape hwr (hA K le_rfl) hC hE hnames⟩
 
 end StrataGenerators.Stmt.SpecComplete

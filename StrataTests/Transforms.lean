@@ -147,9 +147,7 @@ def unprovenTransforms : List TestDecl :=
       -- containment and not equality, because the pass copies the obligations of the callee
       -- to each call site by design.
       ("procInline: symbolic evaluation loses no obligation",
-       fun gp => checkInlineProcSymbolicAgreement gp.prog,
-       .knownFailure "symbolic evaluation of the inlined program loses an obligation from a \
-         callee precondition (e.g. `requires bv8.sMulOverflow(…)`); failed on both full runs of 2026-11-11; not yet triaged"),
+       fun gp => checkInlineProcSymbolicAgreement gp.prog),
       -- NondetElim and LoopInitHoist: the postconditions that neither file proves
       ("nondetElim: no nondet guard is left",
        fun gp => checkNondetElimNoNondetGuard gp.prog),

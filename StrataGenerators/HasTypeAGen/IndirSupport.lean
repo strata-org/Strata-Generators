@@ -113,7 +113,7 @@ theorem genIndir_shape (octx : OpCtx) (τ : LMonoTy)
     ∃ (name : String) (argTys : List LMonoTy) (args : List LExpr'),
       (name, argTys) ∈ findOpsInCtx octx τ ∧
       List.Forall₂ (fun arg σ => arg ∈ SPMF.support (genArg σ)) args argTys ∧
-      e = mkApps (.op () ⟨name, ()⟩
+      e = mkApps (.op genLoc ⟨name, ()⟩
         (some (argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) args := by
   unfold genIndir at he
   simp only [SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff] at he
@@ -135,7 +135,7 @@ theorem genIndirPolyCore_shape (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx
        (name, concreteArgTys) ∈ findPolymorphicOps pctx τ
          (generableTypesFromCtx bctx fctx octx) sampledTys maxNumArgs ∧
        List.Forall₂ (fun arg σ => arg ∈ SPMF.support (genArg σ)) args concreteArgTys ∧
-       e = mkApps (.op () ⟨name, ()⟩
+       e = mkApps (.op genLoc ⟨name, ()⟩
          (some (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) args)
     ∨ e ∈ SPMF.support fallback := by
   unfold genIndirPolyCore at he
@@ -430,7 +430,7 @@ theorem genIndir_measure_le {m : LExpr' → Nat} {tvars : List TyIdentifier}
     (hArg : ∀ σ, (∃ k, σ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars k)) → ∀ a, a ∈ SPMF.support (genArg σ) → m a ≤ d)
     (hspine : ∀ (nm : String) (annot : LMonoTy) (args : List LExpr'),
       (∀ a ∈ args, m a ≤ d) →
-      m (mkApps (.op () ⟨nm, ()⟩ (some annot)) args) ≤ d + args.length)
+      m (mkApps (.op genLoc ⟨nm, ()⟩ (some annot)) args) ≤ d + args.length)
     (h : (findOpsInCtx octx τ).length > 0) (e : LExpr')
     (he : e ∈ SPMF.support (genIndir (G := SPMF) octx τ genArg h)) :
     m e ≤ d + opCtxArity octx := by
@@ -459,7 +459,7 @@ theorem genIndirPolyCore_measure_le {m : LExpr' → Nat} {tvars : List TyIdentif
     (hFallback : ∀ a, a ∈ SPMF.support fallback → m a ≤ dfb)
     (hspine : ∀ (nm : String) (annot : LMonoTy) (args : List LExpr'),
       (∀ a ∈ args, m a ≤ d) →
-      m (mkApps (.op () ⟨nm, ()⟩ (some annot)) args) ≤ d + args.length)
+      m (mkApps (.op genLoc ⟨nm, ()⟩ (some annot)) args) ≤ d + args.length)
     (e : LExpr')
     (he : e ∈ SPMF.support
       (genIndirPolyCore (G := SPMF) fctx octx pctx bctx τ genArg fallback maxNumArgs)) :

@@ -3,7 +3,7 @@ import Basalt.IO
 import Basalt.Combinators
 import Basalt.Tuning.Attr
 import BasaltExamples.ArbString.Def
-import Strata.Languages.Core.CmdTypeSpec
+import Strata.Languages.Core.Typing.Spec.CmdTypeSpec
 import StrataGenerators.HasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen.Core
 
@@ -168,7 +168,7 @@ def binderAnnotsKnownIn (kt : Lambda.KnownTypes) (e : LExpr') : Bool :=
 
 /-- `e` when `binderAnnotsKnownIn kt e` holds, and the constant `true` otherwise. -/
 def knownOrTrue (kt : Lambda.KnownTypes) (e : LExpr') : LExpr' :=
-  if binderAnnotsKnownIn kt e then e else .const () (.boolConst true)
+  if binderAnnotsKnownIn kt e then e else .const genLoc (.boolConst true)
 
 /-- Makes `init x τ (det e)` with a fresh name that is not in `avoid` and a well-typed expression.
     The initial value `e` draws its free variables from the current scope, which is

@@ -31,7 +31,7 @@ namespace ProgramGen
 /-- A successful `addMutualBlock` leaves `rigidTypeVars` unchanged (it only grows
     `datatypes`/`knownTypes`/`functions`). -/
 theorem addMutualBlock_rigid {C C' : LContext CoreLParams} {block : MutualDatatype Unit}
-    (h : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+    (h : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit _
       _ C block = .ok C') :
     C'.rigidTypeVars = C.rigidTypeVars := by
   unfold LContext.addMutualBlock at h
@@ -125,6 +125,7 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
           _ _ _ _ _ hadd hinv.datatypesKnown
         octxWK := ?_
         sigsWK := fun sig hsig ty hty => wellKindedTy_mono hmono (hinv.sigsWK sig hsig ty hty)
+        sigsTyVars := hinv.sigsTyVars
         exprCtx := exprCtxOk_addMutualBlock hinv.exprCtx hb hmono hpctx
         polysClosed := polysClosed_addMutualBlock hb hinv.polysClosed hpctx }
     · -- known types of `C'` reserved in the grown set.
@@ -234,6 +235,7 @@ theorem procWellTyped_rename {P : Program} {C : LContext CoreLParams} {ts : Type
     oldNamesFresh := h.oldNamesFresh
     typeArgsNodup := h.typeArgsNodup
     noUndeclaredVars := h.noUndeclaredVars
+    declTyVarsBound := h.declTyVarsBound
     signatureWellKinded := h.signatureWellKinded
     modRights := h.modRights
     preconditionsTyped := h.preconditionsTyped
@@ -243,7 +245,7 @@ theorem procWellTyped_rename {P : Program} {C : LContext CoreLParams} {ts : Type
 /-- Soundness of the procedure step. The body is generated under the context and scope of the fold,
     so the procedure is well-typed in `C`; renaming it keeps that. `C` is unchanged, and `Inv`
     survives: `reserved` grows, and the new callable signature writes types that are well kinded
-    in `C`. -/
+    in `C` and mention only the type parameters of the procedure. -/
 theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) (hProcs : ProcSigCorresponds s.procs P)
     (hLocalTypes : ∀ n ∈ programNamesOfKind P .type, ¬ isLocalTypeName n.name)
@@ -260,7 +262,7 @@ theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
       (fun _ hp => List.mem_append_right _ hp)
   have hpt : ProcWellTyped P s.C [] proc₀ :=
     genProcedure_sound_ambient P s.octx s.procs hProcs hLocalTypes b.procSize b.procLen s.C s.Γ
-      (wellKindedAmbient_of_inv hinv) s.derivedPctx hops proc₀ hproc₀
+      (wellKindedAmbient_of_inv hinv) hinv.sigsTyVars s.derivedPctx hops proc₀ hproc₀
   have hpt' : ProcWellTyped P s.C []
       { proc₀ with header := { proc₀.header with name := ⟨nm, ()⟩ } } :=
     procWellTyped_rename hpt
@@ -274,9 +276,14 @@ theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
     fun ty hty => hpt.signatureWellKinded ty (List.mem_append_right _ (hout ty hty))
   refine ⟨DeclsWellTyped.cons _ _ _ _ _ _
       (DeclWellTyped.proc s.C [] _ .empty hpt') (DeclsWellTyped.nil _ _), ?_⟩
-  refine inv_cons_reserved_procs hinv _ _ ?_
-  simp only [hcp, hdO]
-  exact hsigWK
+  have hsigTyVars : ∀ ty ∈ (M ++ O).values, ∀ v ∈ ty.freeVars, v ∈ proc₀.header.typeArgs :=
+    fun ty hty v hv => hpt.noUndeclaredVars v
+      (List.mem_append_right _ (Freshening.freeVars_mem_of_mem (hout ty hty) hv))
+  refine inv_cons_reserved_procs hinv _ _ ?_ ?_
+  · simp only [hcp, hdO]
+    exact hsigWK
+  · simp only [hcp, hdO]
+    exact hsigTyVars
 
 /-! ## Registering declared functions -/
 

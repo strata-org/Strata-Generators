@@ -132,12 +132,12 @@ def fixedTypeDecl : Decl := .type (.con { name := "TestSupportT", params := [] }
 
 /-- A fixed (trivially true) axiom declaration, present in every `mkMixedProgram`. -/
 def fixedAxiomDecl : Decl :=
-  .ax { name := "testSupportAx", e := .const () (.boolConst true) } .empty
+  .ax { name := "testSupportAx", e := .const genLoc (.boolConst true) } .empty
 
 /-- A fixed `distinct` declaration, present in every `mkMixedProgram`. -/
 def fixedDistinctDecl : Decl :=
   .distinct ⟨"testSupportDistinct", ()⟩
-    [.const () (.intConst 0), .const () (.intConst 1)] .empty
+    [.const genLoc (.intConst 0), .const genLoc (.intConst 1)] .empty
 
 /-- The three fixed non-procedure, non-function declarations. Their only job is
     to make `onlyProcsRemoved` / `nonProcDeclsPreserved` / `nonProcsUnchanged`
@@ -288,7 +288,7 @@ def cmdKindEquiv (c1 c2 : Command) : Bool :=
   | .cmd (.assert l1 _ _), .cmd (.assert l2 _ _) => l1 == l2
   | .cmd (.assume l1 _ _), .cmd (.assume l2 _ _) => l1 == l2
   | .cmd (.cover l1 _ _), .cmd (.cover l2 _ _) => l1 == l2
-  | .call p1 _ _, .call p2 _ _ => p1 == p2
+  | .call p1 _ _ _, .call p2 _ _ _ => p1 == p2
   | _, _ => false
 
 mutual
@@ -478,8 +478,8 @@ def cmdObligations : Command → Nat
   | .cmd (.assert _ e _)        => obligationCount e
   | .cmd (.assume _ e _)        => obligationCount e
   | .cmd (.cover _ e _)         => obligationCount e
-  | .call pname args md         =>
-    let _ := (pname, md)
+  | .call pname tyArgs args md =>
+    let _ := (pname, tyArgs, md)
     ((CallArg.getInputExprs args).map obligationCount).sum
 
 mutual
@@ -897,10 +897,10 @@ private def procOf (name : String) (ss : List Statement) : Procedure :=
     spec := { preconditions := [], postconditions := [] }
     body := .structured ss }
 
-private def intLit (i : Int) : Expression.Expr := .const () (.intConst i)
+private def intLit (i : Int) : Expression.Expr := .const genLoc (.intConst i)
 
 private def callOp (name : String) (a b : Expression.Expr) : Expression.Expr :=
-  .app () (.app () (.op () ⟨name, ()⟩ none) a) b
+  .app genLoc (.app genLoc (.op genLoc ⟨name, ()⟩ none) a) b
 
 -- On the empty program (no declarations) every pass is the identity, so every
 -- structural preservation check holds. `checkPrecondFactoryStripped` is the sole
@@ -970,8 +970,8 @@ private def callOp (name : String) (a b : Expression.Expr) : Expression.Expr :=
 private def callerCalleeProgram : List Procedure :=
   [ procOf "D" [],
     procOf "C" [],
-    procOf "B" [.call "C" [] .empty],
-    procOf "A" [.call "B" [] .empty] ]
+    procOf "B" [.call "C" (some []) [] .empty],
+    procOf "A" [.call "B" (some []) [] .empty] ]
 
 -- Targeting `A` keeps `A`, `B`, `C` (the closure) and drops the unrelated `D`.
 #guard (match runPhase (Core.filterProceduresPipelinePhase ["A"] true)

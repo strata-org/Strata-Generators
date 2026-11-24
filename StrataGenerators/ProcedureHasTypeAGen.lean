@@ -1,8 +1,9 @@
 import StrataGenerators.ProcedureHasTypeAGen.Core
 import StrataGenerators.ProcedureHasTypeAGen.Support
 import StrataGenerators.ProcedureHasTypeAGen.MutableVars
+import StrataGenerators.ProcedureHasTypeAGen.DeclTyVars
 import StrataGenerators.CmdHasTypeAGenSound
-import Strata.Languages.Core.ProcedureTypeSpec
+import Strata.Languages.Core.Typing.Spec.ProcedureTypeSpec
 import Strata.Languages.Core.Typing.Spec.TypingSpec
 import Strata.Languages.Core.Typing.Props.TypingSpecProps
 
@@ -598,9 +599,10 @@ set_option maxHeartbeats 800000 in
     (`ProcWellTyped`) in context `C` with no enclosing variable scope, for any program `P` whose
     callable procedures the call-target context `procs` describes (`ProcSigCorresponds`) and
     whose type names are not local type names (`isLocalTypeName`). This
-    holds when the operators and schemes the expressions draw on agree with `C` (`ExprCtxOk`), and
-    the operator types and the written-to blocks of the callees are well kinded in `C` at every
-    list of rigid type variables (`WellKindedAmbient`).
+    holds when the operators and schemes the expressions draw on agree with `C` (`ExprCtxOk`), the
+    operator types and the written-to blocks of the callees are well kinded in `C` at every
+    list of rigid type variables (`WellKindedAmbient`), and those blocks mention only the type
+    parameters of their callee (`hSigsTyVars`).
 
     The body is typed from the generator's seed of inputs, outputs and `old` bindings, whose
     scope agrees with the procedure's body scopes on every lookup. -/
@@ -610,6 +612,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     (size len : Nat) (C : LContext CoreLParams) (Γ : TContext Unit)
     (hWK : ∀ rv : List TyIdentifier,
       StrataGenerators.Stmt.WellKindedAmbient octx procs { C with rigidTypeVars := rv })
+    (hSigsTyVars : ∀ s ∈ procs, ∀ ty ∈ (s.M ++ s.O).values, ∀ v ∈ ty.freeVars, v ∈ s.typeArgs)
     (pctx : PolyOpCtx) (hops : StrataGenerators.AnnotFacts.ExprCtxOk C [] [] octx pctx)
     (proc : Procedure)
     (hproc : proc ∈ SPMF.support
@@ -801,6 +804,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     oldNamesFresh := fun g _ => hOldFresh g,
     typeArgsNodup := htyNodup,
     noUndeclaredVars := ?_,
+    declTyVarsBound := ?_,
     signatureWellKinded := ?_,
     modRights := ?_,
     preconditionsTyped := ?_,
@@ -817,6 +821,17 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     obtain ⟨ty, hty_mem, hv_ty⟩ := hpiece
     have hftv : allFtvarsIn typeArgs ty := genLMonoTy_mem_ftvars (key ty hty_mem)
     exact allFtvarsIn_freeVars hftv v hv_ty
+  · -- declTyVarsBound: the body declares only within the type parameters.
+    intro v hv
+    have hdecls := genStmtChain_tyVars (octx := octx) (tvars := typeArgs) (pctx := pctx) procs []
+      { C with rigidTypeVars := C.rigidTypeVars ++ typeArgs }
+      (M ++ disjointInputs rawInputOnly M ++
+        (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
+      size l (fun ty hty => tyVarsWithin_of_genLMonoTy (hseedVals ty hty)) hSigsTyVars
+      (body, C', ctx') hbody
+    rw [Procedure.bodyCollect_noExprs_eq_cmds, List.mem_flatMap] at hv
+    obtain ⟨c, hc, hvc⟩ := hv
+    exact hdecls.1 c hc v hvc
   · -- signatureWellKinded: the generator makes every declared type.
     intro ty hty
     refine genLMonoTy_mem_wellKindedTy (tvars := typeArgs) hops.arities ⟨size, key ty ?_⟩
@@ -856,20 +871,23 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
 /-- **Soundness of `genProcedure` at the ambient context.** Every procedure that `genProcedure`
     makes in a context `C` is well-typed (`ProcWellTyped`) at that same `C` with no enclosing
     variable scope, when every callable procedure resolves in `P`, no type name of `P` is a local
-    type name, the operator types and the callee signature types are well kinded in `C`, and the
-    operators and schemes agree with `C`. -/
+    type name, the operator types and the callee signature types are well kinded in `C`, the
+    operators and schemes agree with `C`, and the in-out and out-only types of each callee mention
+    only its own type parameters. -/
 theorem genProcedure_sound_ambient (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     (hProcs : ProcSigCorresponds procs P)
     (hLocalTypes : ∀ n ∈ programNamesOfKind P .type, ¬ isLocalTypeName n.name)
     (size len : Nat) (C : LContext CoreLParams) (Γ : TContext Unit)
     (hWK : ∀ rv : List TyIdentifier,
       StrataGenerators.Stmt.WellKindedAmbient octx procs { C with rigidTypeVars := rv })
+    (hSigsTyVars : ∀ s ∈ procs, ∀ ty ∈ (s.M ++ s.O).values, ∀ v ∈ ty.freeVars, v ∈ s.typeArgs)
     (pctx : PolyOpCtx) (hops : StrataGenerators.AnnotFacts.ExprCtxOk C [] [] octx pctx)
     (proc : Procedure)
     (hproc : proc ∈ SPMF.support
       (genProcedure (G := SPMF) octx procs C Γ size len pctx (maxStmtSeqLen := maxStmtSeqLen))) :
     ProcWellTyped P C [] proc :=
-  genProcedure_sound P octx procs hProcs hLocalTypes size len C Γ hWK pctx hops proc hproc
+  genProcedure_sound P octx procs hProcs hLocalTypes size len C Γ hWK hSigsTyVars pctx hops proc
+    hproc
 
 -- ── Completeness ─────────────────────────────────────────────────────────
 
