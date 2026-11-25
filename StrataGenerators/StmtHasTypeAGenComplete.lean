@@ -251,11 +251,36 @@ def stepCtxList (ctx : VarCtx) : List Statement → VarCtx
   | [] => ctx
   | s :: ss => stepCtxList (stepCtx ctx s) ss
 
+/-- The known types after a statement: a top-level `typeDecl` registers its
+    constructor, and every other statement leaves them unchanged. -/
+def stepKt (kt : Lambda.KnownTypes) : Statement → Lambda.KnownTypes
+  | .typeDecl tc _ =>
+    match kt.addWithError { name := tc.name, metadata := tc.numargs } default with
+    | .ok kt' => kt'
+    | .error _ => kt
+  | _ => kt
+
+/-- A well-typed statement changes the known types as `stepKt` says: only a
+    top-level `typeDecl` registers a constructor. -/
+theorem stepKt_of_wellTyped {P : Program} {C C' : LContext CoreLParams} {ts ts' : TypeScopes}
+    {L : List String} {s : Statement} (h : StatementWellTyped P C ts L s C' ts') :
+    C'.knownTypes = stepKt C.knownTypes s := by
+  cases h with
+  | typeDecl _ _ _ _ tc _ _ _ hoktc _ =>
+    unfold LContext.addKnownTypeWithError at hoktc
+    cases hk : C.knownTypes.addWithError { name := tc.name, metadata := tc.numargs } default with
+    | error _ => simp only [hk, bind, Except.bind, reduceCtorEq] at hoktc
+    | ok kt' =>
+      simp only [hk, bind, Except.bind, Except.ok.injEq] at hoktc
+      subst hoktc
+      simp only [stepKt, hk]
+  | _ => rfl
+
 -- ── Residual call-recipe side condition (`CallOk`), scope-threaded ──────────
 
 mutual
-/-- The call-recipe side condition, threaded through the evolving scope `ctx` and at
-    size `n`. A `.cmd (.call …)` is admissible only when its argument list is exactly
+/-- The call-recipe side condition, threaded through the evolving scope `ctx` and known types
+    `kt`, and at size `n`. A `.cmd (.call …)` is admissible only when its argument list is exactly
     the generator's recipe for *some* sampled type-instantiation `σvals` (with
     `σ := s.typeArgs.zip σvals`) and *some* argument-order mask `mask`:
     `mkArgs s.M (outTargets [] ctx (substSig σ s.O)) exprs mask` for some callee `s`
@@ -277,7 +302,8 @@ mutual
     *every* order-preserving interleaving of the by-value inputs with the out
     targets, and `exists_mask_mkArgs_iff` shows it reaches no more than those. So
     this clause admits exactly the argument orders the `call` rule leaves free. -/
-def CallOk (imm : List (Identifier Unit)) (procs : ProcSigCtx) (ctx : VarCtx) (n : Nat) : Statement → Prop
+def CallOk (imm : List (Identifier Unit)) (procs : ProcSigCtx) (kt : Lambda.KnownTypes)
+    (ctx : VarCtx) (n : Nat) : Statement → Prop
   | .cmd (CmdExt.call pname tyArgs args _) =>
       ∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr)
         (mask : List Bool),
@@ -285,7 +311,7 @@ def CallOk (imm : List (Identifier Unit)) (procs : ProcSigCtx) (ctx : VarCtx) (n
         s.pname = pname ∧
         σvals ∈ SPMF.support
           (s.typeArgs.mapM (fun _ =>
-            sampleTyArg tvars (generableTypesFromCtx ctx.values [] octx)) :
+            sampleTyArg kt tvars n (generableTypesFromCtx ctx.values [] octx)) :
             SPMF (List LMonoTy)) ∧
         args = StrataGenerators.Stmt.mkArgs s.M
           (outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
@@ -298,16 +324,19 @@ def CallOk (imm : List (Identifier Unit)) (procs : ProcSigCtx) (ctx : VarCtx) (n
   | .cmd (CmdExt.cmd _) => True
   -- Nested bodies are generated one size smaller, so their calls' inputs are
   -- reachable at `n-1` (mirroring `AlphabetOk` and `genStmt (size+1)` → `size`).
-  | .block _ body _ => CallOkList imm procs ctx (n - 1) body
-  | .ite _ t e _ => CallOkList imm procs ctx (n - 1) t ∧ CallOkList imm procs ctx (n - 1) e
-  | .loop _ _ _ body _ => CallOkList imm procs ctx (n - 1) body
+  | .block _ body _ => CallOkList imm procs kt ctx (n - 1) body
+  | .ite _ t e _ => CallOkList imm procs kt ctx (n - 1) t ∧ CallOkList imm procs kt ctx (n - 1) e
+  | .loop _ _ _ body _ => CallOkList imm procs kt ctx (n - 1) body
   | .exit _ _ => True
   | .typeDecl _ _ => True
 
-/-- `CallOk` lifted to a statement chain, threading the scope with `stepCtx`. -/
-def CallOkList (imm : List (Identifier Unit)) (procs : ProcSigCtx) (ctx : VarCtx) (n : Nat) : List Statement → Prop
+/-- `CallOk` lifted to a statement chain, threading the scope with `stepCtx`
+    and the known types with `stepKt`. -/
+def CallOkList (imm : List (Identifier Unit)) (procs : ProcSigCtx) (kt : Lambda.KnownTypes)
+    (ctx : VarCtx) (n : Nat) : List Statement → Prop
   | [] => True
-  | s :: ss => CallOk imm procs ctx n s ∧ CallOkList imm procs (stepCtx ctx s) n ss
+  | s :: ss =>
+    CallOk imm procs kt ctx n s ∧ CallOkList imm procs (stepKt kt s) (stepCtx ctx s) n ss
 end
 
 -- ── Residual write side condition (`WritesOk`) ───────────────────────────────
@@ -709,7 +738,7 @@ theorem spec_complete_at (P : Program) (imm : List (Identifier Unit)) (procs : P
     ∀ (ctx : VarCtx) (n : Nat),
       Strata.Util.HMaps.Equiv ts (procToTCtx ctx).types →
       InGenShape s → WritesOk imm s → AlphabetOk tvars maxStmtSeqLen n s →
-      CallOk (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx n s →
+      CallOk (octx := octx) (tvars := tvars) (pctx := pctx) imm procs C.knownTypes ctx n s →
       ExprOk (octx := octx) (tvars := tvars) (pctx := pctx) ctx n s →
       StatementNamesWF P (fun x => x ∈ C.functions) s →
       ∃ ctx', Strata.Util.HMaps.Equiv ts' (procToTCtx ctx').types ∧
@@ -720,7 +749,7 @@ theorem spec_complete_at (P : Program) (imm : List (Identifier Unit)) (procs : P
     ∀ (ctx : VarCtx) (n : Nat),
       Strata.Util.HMaps.Equiv ts (procToTCtx ctx).types →
       InGenShapeList ss → WritesOkList imm ss → AlphabetOkList tvars maxStmtSeqLen n ss →
-      CallOkList (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx n ss →
+      CallOkList (octx := octx) (tvars := tvars) (pctx := pctx) imm procs C.knownTypes ctx n ss →
       ExprOkList (octx := octx) (tvars := tvars) (pctx := pctx) ctx n ss →
       StatementsNamesWF P (fun x => x ∈ C.functions) ss →
       ∃ ctx', Strata.Util.HMaps.Equiv ts' (procToTCtx ctx').types ∧
@@ -860,8 +889,13 @@ theorem spec_complete_at (P : Program) (imm : List (Identifier Unit)) (procs : P
     -- tail continues from there, so its threaded `CallOkList`/scope line up exactly.
     obtain ⟨ctx1, hctx1, hstep1, hsmem⟩ := ihs ctx n hΓ hnfs hwrs hoks hcalls hexpr.1 hnm.1
     subst hstep1
+    have hcallss' : CallOkList (octx := octx) (tvars := tvars) (pctx := pctx) imm procs
+        C1.knownTypes (stepCtx ctx s) n ss := by
+      rw [stepKt_of_wellTyped hs]
+      exact hcallss
     obtain ⟨ctx2, hctx2, hstep2, hssmem⟩ :=
-      ihss (stepCtx ctx s) n hctx1 hnfss hwrss hokss hcallss hexpr.2 (statementsNamesWF_tail hs hnm)
+      ihss (stepCtx ctx s) n hctx1 hnfss hwrss hokss hcallss' hexpr.2
+        (statementsNamesWF_tail hs hnm)
     refine ⟨ctx2, hctx2, ?_, ?_⟩
     · show ctx2 = stepCtxList ctx (s :: ss); rw [hstep2]; rfl
     · have hcons := genStmtChain_cons_mem procs C ctx n ss.length ⟨[s], C1, stepCtx ctx s⟩ ss C2

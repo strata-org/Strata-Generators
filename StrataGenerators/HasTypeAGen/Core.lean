@@ -327,6 +327,37 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
               (by simp)) ]
         (by simp)
 
+/-- Draw a type with no arguments to fill: a bitvector, a type variable of
+    `tvars`, or a type constructor of `kt` that takes no arguments. -/
+def genKnownLeaf [Gen G] (kt : Lambda.KnownTypes) (tvars : List TyIdentifier) : G LMonoTy :=
+  let nullary := ((Std.HashMap.toList kt).filter (·.2 == 0)).map Prod.fst
+  oneOf
+    ((fun () => pickBitvecWidth) ::
+      ((if h : tvars.length > 0 then [fun () => pickTyVar tvars h] else []) ++
+        (if h : nullary ≠ [] then
+          [fun () => (fun name => LMonoTy.tcons name []) <$> elements nullary h]
+        else [])))
+    (List.cons_ne_nil _ _)
+
+/-- Generate a type of depth at most `n` that is well-kinded for the known
+    types `kt`: every type constructor of `kt` with arguments, at its
+    registered arity, over arguments of smaller depth, with leaves from
+    `genKnownLeaf`. The constructor `bitvec` is skipped, so a bitvector only
+    appears as `.bitvec w`. -/
+def genKnownTy [Gen G] (kt : Lambda.KnownTypes) (tvars : List TyIdentifier) : Nat → G LMonoTy
+  | 0 => genKnownLeaf kt tvars
+  | n + 1 =>
+    let compound := (Std.HashMap.toList kt).filter (fun kc => kc.2 != 0 && kc.1 != "bitvec")
+    if h : compound ≠ [] then
+      frequency
+        [ (2, fun () => genKnownLeaf kt tvars),
+          (1, fun () => do
+            let kc ← elements compound h
+            let args ← vectorOf kc.2 (genKnownTy kt tvars n)
+            pure (.tcons kc.1 args)) ]
+        (by simp)
+    else genKnownLeaf kt tvars
+
 -- ── The combinators for a sub-generator of an expression ─────────────
 --
 -- Each combinator takes the generators that it calls as explicit arguments. Therefore no combinator

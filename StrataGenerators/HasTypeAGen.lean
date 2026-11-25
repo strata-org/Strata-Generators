@@ -43,6 +43,8 @@ identifier metadata and monotype annotations. Every generated node carries the o
 - `HasTypeA'`: the typing judgment `HasTypeA`, at these `LExprParams`.
 - `genLMonoTy`: a generator of a monotype.
 - `genLMonoTy_mem_*`: the lemmas about the types that `genLMonoTy` can generate.
+- `genKnownTy`: a generator of the well-kinded types over a table of known type constructors, with
+  soundness (`genKnownTy_sound`) and completeness (`genKnownTy_complete`).
 - `genLExpr`: a generator of a well-typed `LExpr` at a given type and depth budget.
 - The soundness of `genLExpr`, which says that each generated expression is well-typed.
 - An `IsSoundAndComplete` instance for `genLMonoTy`.
@@ -2274,6 +2276,298 @@ theorem genLMonoTy_mem_wellKindedTy {C : LContext CoreLParams} (hC : SimpleTyAri
     · exact hC.seq
     · exact ih ref n hn
 
+-- ── The support of `genKnownTy` ─────────────────────────────────────
+
+/-- A type constructor name is nullary in the list that `genKnownLeaf` filters
+    exactly when `kt` registers it at arity 0. -/
+private theorem mem_nullary_iff (kt : Lambda.KnownTypes) (name : String) :
+    name ∈ ((Std.HashMap.toList kt).filter (·.2 == 0)).map Prod.fst ↔ kt[name]? = some 0 := by
+  constructor
+  · intro h
+    obtain ⟨⟨n, k⟩, hfilt, rfl⟩ := List.mem_map.mp h
+    obtain ⟨hmem, hk⟩ := List.mem_filter.mp hfilt
+    simp only [beq_iff_eq] at hk
+    have hget := Std.HashMap.mem_toList_iff_getElem?_eq_some.mp hmem
+    rw [hk] at hget
+    exact hget
+  · intro h
+    refine List.mem_map.mpr ⟨(name, 0), List.mem_filter.mpr ⟨?_, by simp⟩, rfl⟩
+    exact Std.HashMap.mem_toList_iff_getElem?_eq_some.mpr h
+
+/-- `genKnownLeaf` draws exactly the bitvectors, the type variables of `tvars`
+    and the nullary type constructors of `kt`. -/
+private theorem mem_support_genKnownLeaf_iff (kt : Lambda.KnownTypes) (tvars : List TyIdentifier)
+    (τ : LMonoTy) :
+    τ ∈ SPMF.support (genKnownLeaf (G := SPMF) kt tvars) ↔
+      (∃ w, τ = .bitvec w) ∨ (∃ a ∈ tvars, τ = .ftvar a) ∨
+        ∃ name, kt[name]? = some 0 ∧ τ = .tcons name [] := by
+  unfold genKnownLeaf
+  rw [mem_support_oneOf_iff (List.cons_ne_nil _ _)]
+  have hnull := mem_nullary_iff kt
+  generalize ((Std.HashMap.toList kt).filter (·.2 == 0)).map Prod.fst = nullary at hnull ⊢
+  by_cases htv : tvars.length > 0 <;> by_cases hn : nullary ≠ []
+  · have hne : tvars ≠ [] := List.ne_nil_of_length_pos htv
+    simp only [htv, hn, dite_true, List.mem_cons, List.mem_append,
+      List.not_mem_nil, or_false, exists_eq_or_imp, exists_eq_left, ne_eq, not_false_eq_true,
+      mem_support_map_iff, mem_support_elements_iff hn]
+    constructor
+    · rintro (h | h | ⟨a, ha, rfl⟩)
+      · exact Or.inl (pickBitvecWidth_mem _ h)
+      · obtain ⟨name, hm, rfl⟩ := pickTyVar_mem tvars htv τ h
+        exact Or.inr (Or.inl ⟨name, hm, rfl⟩)
+      · exact Or.inr (Or.inr ⟨a, (hnull a).mp ha, rfl⟩)
+    · rintro (⟨w, rfl⟩ | ⟨a, ha, rfl⟩ | ⟨name, hk, rfl⟩)
+      · exact Or.inl (pickBitvecWidth_complete w)
+      · exact Or.inr (Or.inl (pickTyVar_complete tvars htv a ha))
+      · exact Or.inr (Or.inr ⟨name, (hnull name).mpr hk, rfl⟩)
+  · have hnil : nullary = [] := not_not.mp hn
+    simp only [htv, hn, dite_true, dite_false, List.mem_cons, List.mem_append,
+      List.not_mem_nil, or_false, exists_eq_or_imp, exists_eq_left]
+    constructor
+    · rintro (h | h)
+      · exact Or.inl (pickBitvecWidth_mem _ h)
+      · obtain ⟨name, hm, rfl⟩ := pickTyVar_mem tvars htv τ h
+        exact Or.inr (Or.inl ⟨name, hm, rfl⟩)
+    · rintro (⟨w, rfl⟩ | ⟨a, ha, rfl⟩ | ⟨name, hk, rfl⟩)
+      · exact Or.inl (pickBitvecWidth_complete w)
+      · exact Or.inr (pickTyVar_complete tvars htv a ha)
+      · have hin := (hnull name).mpr hk
+        rw [hnil] at hin
+        exact absurd hin List.not_mem_nil
+  · have hnilT : tvars = [] := List.length_eq_zero_iff.mp (by omega)
+    simp only [htv, hn, dite_true, dite_false, List.mem_cons, List.not_mem_nil, or_false,
+      exists_eq_or_imp, exists_eq_left, ne_eq, not_false_eq_true, mem_support_map_iff,
+      mem_support_elements_iff hn, List.nil_append]
+    constructor
+    · rintro (h | ⟨a, ha, rfl⟩)
+      · exact Or.inl (pickBitvecWidth_mem _ h)
+      · exact Or.inr (Or.inr ⟨a, (hnull a).mp ha, rfl⟩)
+    · rintro (⟨w, rfl⟩ | ⟨a, ha, rfl⟩ | ⟨name, hk, rfl⟩)
+      · exact Or.inl (pickBitvecWidth_complete w)
+      · rw [hnilT] at ha
+        exact absurd ha List.not_mem_nil
+      · exact Or.inr ⟨name, (hnull name).mpr hk, rfl⟩
+  · have hnilT : tvars = [] := List.length_eq_zero_iff.mp (by omega)
+    have hnil : nullary = [] := not_not.mp hn
+    simp only [htv, hn, dite_false, List.mem_cons, List.not_mem_nil, or_false, exists_eq_left,
+      List.append_nil]
+    constructor
+    · intro h
+      exact Or.inl (pickBitvecWidth_mem _ h)
+    · rintro (⟨w, rfl⟩ | ⟨a, ha, rfl⟩ | ⟨name, hk, rfl⟩)
+      · exact pickBitvecWidth_complete w
+      · rw [hnilT] at ha
+        exact absurd ha List.not_mem_nil
+      · have hin := (hnull name).mpr hk
+        rw [hnil] at hin
+        exact absurd hin List.not_mem_nil
+
+/-- At size `n + 1`, `genKnownTy` draws a leaf, or a type constructor of `kt`
+    other than `bitvec` applied to as many arguments as its arity, each drawn
+    at size `n`. -/
+private theorem mem_support_genKnownTy_succ_iff (kt : Lambda.KnownTypes)
+    (tvars : List TyIdentifier) (n : Nat) (τ : LMonoTy) :
+    τ ∈ SPMF.support (genKnownTy (G := SPMF) kt tvars (n + 1)) ↔
+      τ ∈ SPMF.support (genKnownLeaf (G := SPMF) kt tvars) ∨
+        ∃ name args, kt[name]? = some args.length ∧ args ≠ [] ∧ name ≠ "bitvec" ∧
+          (∀ a ∈ args, a ∈ SPMF.support (genKnownTy (G := SPMF) kt tvars n)) ∧
+          τ = .tcons name args := by
+  have hcomp : ∀ name k, (name, k) ∈ (Std.HashMap.toList kt).filter
+      (fun kc => kc.2 != 0 && kc.1 != "bitvec") ↔
+      kt[name]? = some k ∧ k ≠ 0 ∧ name ≠ "bitvec" := by
+    intro name k
+    simp only [List.mem_filter, Std.HashMap.mem_toList_iff_getElem?_eq_some, Bool.and_eq_true,
+      bne_iff_ne, ne_eq, and_assoc]
+  rw [genKnownTy.eq_2]
+  split
+  · rename_i hne
+    rw [mem_support_frequency_iff]
+    constructor
+    · rintro ⟨w, g, hg, _, hmem⟩
+      simp only [List.mem_cons, List.not_mem_nil, or_false, Prod.mk.injEq] at hg
+      rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
+      · exact Or.inl hmem
+      · simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_vectorOf_iff] at hmem
+        obtain ⟨kc, hkc, args, ⟨hlen, hargs⟩, rfl⟩ := hmem
+        rw [mem_support_elements_iff hne] at hkc
+        have hk : kt[kc.1]? = some kc.2 ∧ kc.2 ≠ 0 ∧ kc.1 ≠ "bitvec" := (hcomp kc.1 kc.2).mp hkc
+        refine Or.inr ⟨kc.1, args, ?_, ?_, hk.2.2, hargs, rfl⟩
+        · rw [hlen]; exact hk.1
+        · intro hnil
+          rw [hnil] at hlen
+          exact hk.2.1 hlen.symm
+    · rintro (hleaf | ⟨name, args, hk, hargs0, hbv, hargs, rfl⟩)
+      · exact ⟨2, _, List.mem_cons_self, by omega, hleaf⟩
+      · refine ⟨1, _, List.mem_cons_of_mem _ List.mem_cons_self, by omega, ?_⟩
+        simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_vectorOf_iff]
+        have hlen0 : args.length ≠ 0 := fun h => hargs0 (List.length_eq_zero_iff.mp h)
+        exact ⟨(name, args.length), (mem_support_elements_iff hne).mpr
+          ((hcomp name args.length).mpr ⟨hk, hlen0, hbv⟩), args, ⟨rfl, hargs⟩, rfl⟩
+  · rename_i hnil
+    have hnil' : (Std.HashMap.toList kt).filter
+        (fun kc => kc.2 != 0 && kc.1 != "bitvec") = [] := not_not.mp hnil
+    constructor
+    · intro h
+      exact Or.inl h
+    · rintro (hleaf | ⟨name, args, hk, hargs0, hbv, _, _⟩)
+      · exact hleaf
+      · have hlen0 : args.length ≠ 0 := fun h => hargs0 (List.length_eq_zero_iff.mp h)
+        have hin := (hcomp name args.length).mpr ⟨hk, hlen0, hbv⟩
+        rw [hnil'] at hin
+        exact absurd hin List.not_mem_nil
+
+/-- A leaf that `genKnownLeaf` draws is also drawn by `genKnownTy` at every
+    size. -/
+private theorem genKnownLeaf_mem_genKnownTy (kt : Lambda.KnownTypes)
+    (tvars : List TyIdentifier) {τ : LMonoTy}
+    (h : τ ∈ SPMF.support (genKnownLeaf (G := SPMF) kt tvars)) (n : Nat) :
+    τ ∈ SPMF.support (genKnownTy (G := SPMF) kt tvars n) := by
+  cases n with
+  | zero => exact h
+  | succ n => exact (mem_support_genKnownTy_succ_iff kt tvars n τ).mpr (Or.inl h)
+
+/-- A type that `genKnownTy` draws at one size is drawn at every larger size. -/
+theorem genKnownTy_mem_mono (kt : Lambda.KnownTypes) (tvars : List TyIdentifier) {m m' : Nat}
+    (hle : m ≤ m') {τ : LMonoTy}
+    (h : τ ∈ SPMF.support (genKnownTy (G := SPMF) kt tvars m)) :
+    τ ∈ SPMF.support (genKnownTy (G := SPMF) kt tvars m') := by
+  have hstep : ∀ k τ, τ ∈ SPMF.support (genKnownTy (G := SPMF) kt tvars k) →
+      τ ∈ SPMF.support (genKnownTy (G := SPMF) kt tvars (k + 1)) := by
+    intro k
+    induction k with
+    | zero => exact fun τ h => genKnownLeaf_mem_genKnownTy kt tvars h 1
+    | succ k ih =>
+      intro τ h
+      rcases (mem_support_genKnownTy_succ_iff kt tvars k τ).mp h with
+        hleaf | ⟨name, args, hk, hne, hbv, hargs, rfl⟩
+      · exact genKnownLeaf_mem_genKnownTy kt tvars hleaf (k + 2)
+      · exact (mem_support_genKnownTy_succ_iff kt tvars (k + 1) _).mpr
+          (Or.inr ⟨name, args, hk, hne, hbv, fun a ha => ih a (hargs a ha), rfl⟩)
+  induction hle with
+  | refl => exact h
+  | step _ ih => exact hstep _ _ ih
+
+/-- A type that `genKnownTy kt tvars` draws mentions only type variables of
+    `tvars` and is well-kinded: each type constructor in it is applied at the
+    arity that `kt` registers. It never applies `bitvec` to arguments: a
+    bitvector appears only as `.bitvec w`. -/
+theorem genKnownTy_sound (kt : Lambda.KnownTypes) (tvars : List TyIdentifier) :
+    ∀ (n : Nat) (τ : LMonoTy), τ ∈ SPMF.support (genKnownTy (G := SPMF) kt tvars n) →
+      allFtvarsIn tvars τ ∧ LMonoTy.WellKinded (fun name => kt[name]?) τ ∧
+        ∀ k, ("bitvec", k + 1) ∉ getTypeConsArities τ := by
+  have hleaf : ∀ τ, τ ∈ SPMF.support (genKnownLeaf (G := SPMF) kt tvars) →
+      allFtvarsIn tvars τ ∧ LMonoTy.WellKinded (fun name => kt[name]?) τ ∧
+        ∀ k, ("bitvec", k + 1) ∉ getTypeConsArities τ := by
+    intro τ h
+    -- A bitvector and a type variable have no type constructor, so no arities.
+    have hnone : ∀ t : LMonoTy, ((∃ w, t = .bitvec w) ∨ ∃ a, t = .ftvar a) →
+        ∀ (ref : String) (k : Nat), (ref, k) ∉ getTypeConsArities t := by
+      rintro t (⟨w, rfl⟩ | ⟨a, rfl⟩) ref k hmem <;>
+        simp only [getTypeConsArities, List.not_mem_nil] at hmem
+    rcases (mem_support_genKnownLeaf_iff kt tvars τ).mp h with
+      ⟨w, rfl⟩ | ⟨a, ha, rfl⟩ | ⟨name, hk, rfl⟩
+    · have hfvw : allFtvarsIn tvars (.bitvec w) := by simp only [allFtvarsIn]
+      have hnw := hnone _ (Or.inl ⟨w, rfl⟩)
+      exact ⟨hfvw, fun ref k hmem => absurd hmem (hnw ref k),
+        fun k hmem => hnw "bitvec" (k + 1) hmem⟩
+    · have hfva : allFtvarsIn tvars (.ftvar a) := by simpa only [allFtvarsIn] using ha
+      have hna := hnone _ (Or.inr ⟨a, rfl⟩)
+      exact ⟨hfva, fun ref k hmem => absurd hmem (hna ref k),
+        fun k hmem => hna "bitvec" (k + 1) hmem⟩
+    · have hfvc : allFtvarsIn tvars (.tcons name []) := by
+        simp only [allFtvarsIn, List.not_mem_nil, false_imp_iff, implies_true]
+      refine ⟨hfvc, ?_, ?_⟩
+      · intro ref k hmem
+        simp only [getTypeConsArities, List.flatMap_nil, List.length_nil, List.mem_singleton,
+          Prod.mk.injEq] at hmem
+        obtain ⟨rfl, rfl⟩ := hmem
+        exact hk
+      · intro k hmem
+        simp only [getTypeConsArities, List.flatMap_nil, List.length_nil, List.mem_singleton,
+          Prod.mk.injEq] at hmem
+        omega
+  intro n
+  induction n with
+  | zero => exact hleaf
+  | succ n ih =>
+    intro τ h
+    rcases (mem_support_genKnownTy_succ_iff kt tvars n τ).mp h with
+      hl | ⟨name, args, hk, _, hbv, hargs, rfl⟩
+    · exact hleaf τ hl
+    · have hfvt : allFtvarsIn tvars (.tcons name args) := by
+        simp only [allFtvarsIn]
+        exact fun a ha => (ih a (hargs a ha)).1
+      refine ⟨hfvt, ?_, ?_⟩
+      · intro ref k hmem
+        simp only [getTypeConsArities, List.mem_cons, Prod.mk.injEq, List.mem_flatMap] at hmem
+        rcases hmem with ⟨rfl, rfl⟩ | ⟨a, ha, hmem⟩
+        · exact hk
+        · exact (ih a (hargs a ha)).2.1 ref k hmem
+      · intro k hmem
+        simp only [getTypeConsArities, List.mem_cons, Prod.mk.injEq, List.mem_flatMap] at hmem
+        rcases hmem with ⟨hname, _⟩ | ⟨a, ha, hmem⟩
+        · exact hbv hname.symm
+        · exact (ih a (hargs a ha)).2.2 k hmem
+
+/-- Every type over `tvars` that is well-kinded for `kt` and never applies
+    `bitvec` to arguments is drawn by `genKnownTy kt tvars` at every size above
+    its `sizeOf`. -/
+theorem genKnownTy_complete (kt : Lambda.KnownTypes) (tvars : List TyIdentifier) :
+    ∀ (s : Nat) (τ : LMonoTy), sizeOf τ < s → allFtvarsIn tvars τ →
+      LMonoTy.WellKinded (fun name => kt[name]?) τ →
+      (∀ k, ("bitvec", k + 1) ∉ getTypeConsArities τ) →
+      τ ∈ SPMF.support (genKnownTy (G := SPMF) kt tvars s) := by
+  intro s
+  induction s with
+  | zero =>
+    intro τ hs
+    exact absurd hs (Nat.not_lt_zero _)
+  | succ s ih =>
+    intro τ hs hfv hwk hnobv
+    have hleaf : ∀ t, ((∃ w, t = .bitvec w) ∨ (∃ a ∈ tvars, t = .ftvar a) ∨
+        ∃ name, kt[name]? = some 0 ∧ t = .tcons name []) →
+        t ∈ SPMF.support (genKnownTy (G := SPMF) kt tvars (s + 1)) := fun t ht =>
+      genKnownLeaf_mem_genKnownTy kt tvars ((mem_support_genKnownLeaf_iff kt tvars t).mpr ht) _
+    match τ with
+    | .bitvec w => exact hleaf _ (Or.inl ⟨w, rfl⟩)
+    | .ftvar a =>
+      have ha : a ∈ tvars := by simpa only [allFtvarsIn] using hfv
+      exact hleaf _ (Or.inr (Or.inl ⟨a, ha, rfl⟩))
+    | .tcons name [] =>
+      have hmemArity : (name, 0) ∈ getTypeConsArities (.tcons name []) := by
+        simp only [getTypeConsArities, List.flatMap_nil, List.length_nil, List.mem_singleton]
+      have hk : kt[name]? = some 0 := hwk name 0 hmemArity
+      exact hleaf _ (Or.inr (Or.inr ⟨name, hk, rfl⟩))
+    | .tcons name (a :: rest) =>
+      have hmemArity :
+          (name, (a :: rest).length) ∈ getTypeConsArities (.tcons name (a :: rest)) := by
+        simp only [getTypeConsArities, List.mem_cons, true_or]
+      have hk : kt[name]? = some (a :: rest).length := hwk name _ hmemArity
+      have hbv : name ≠ "bitvec" := by
+        intro hname
+        refine hnobv rest.length ?_
+        rw [← hname]
+        simp [getTypeConsArities]
+      refine (mem_support_genKnownTy_succ_iff kt tvars s _).mpr
+        (Or.inr ⟨name, a :: rest, hk, List.cons_ne_nil _ _, hbv, ?_, rfl⟩)
+      intro b hb
+      have hsize : sizeOf b < s := by
+        have hlt := List.sizeOf_lt_of_mem hb
+        simp only [LMonoTy.tcons.sizeOf_spec] at hs
+        omega
+      have hfvb : allFtvarsIn tvars b := by
+        simp only [allFtvarsIn] at hfv
+        exact hfv b hb
+      refine ih b hsize hfvb ?_ ?_
+      · intro ref k hmem
+        refine hwk ref k ?_
+        simp only [getTypeConsArities, List.mem_cons, List.mem_flatMap]
+        exact Or.inr ⟨b, List.mem_cons.mp hb, hmem⟩
+      · intro k hmem
+        refine hnobv k ?_
+        simp only [getTypeConsArities, List.mem_cons, List.mem_flatMap]
+        exact Or.inr ⟨b, List.mem_cons.mp hb, hmem⟩
+
 namespace StrataGenerators.Function
 
 /-- `allFtvarsIn tvars τ` says that each free type variable of `τ` comes from `tvars`. This theorem
@@ -2299,6 +2593,22 @@ theorem allFtvarsIn_freeVars {tvars : List TyIdentifier} {τ : LMonoTy}
     -- Reduce membership in `LMonoTys.freeVars` to an element that holds `v`.
     obtain ⟨ty, hty_mem, hv_ty⟩ := Freshening.exists_of_freeVars_mem hv
     exact ih ty hty_mem (hargs ty hty_mem) v hv_ty
+
+/-- If every free type variable of `τ` is in `tvars`, then
+    `allFtvarsIn tvars τ` holds. -/
+theorem allFtvarsIn_of_freeVars {tvars : List TyIdentifier} {τ : LMonoTy}
+    (h : ∀ v ∈ LMonoTy.freeVars τ, v ∈ tvars) : allFtvarsIn tvars τ := by
+  induction τ with
+  | ftvar f =>
+    simp only [allFtvarsIn]
+    exact h f (by simp only [LMonoTy.freeVars, List.mem_singleton])
+  | bitvec n => simp only [allFtvarsIn]
+  | tcons name args ih =>
+    simp only [allFtvarsIn]
+    intro a ha
+    refine ih a ha fun v hv => h v ?_
+    simp only [LMonoTy.freeVars]
+    exact Freshening.freeVars_mem_of_mem ha hv
 
 /-- A type that `genLMonoTy` can make is an instance of a known type in each context that registers
     the built-in type constructors at their arities. -/

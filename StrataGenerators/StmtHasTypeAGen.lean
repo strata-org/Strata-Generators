@@ -189,12 +189,6 @@ theorem WellKindedOk.generable {octx : OpCtx} {procs : ProcSigCtx}
     ∀ ty ∈ generableTypesFromCtx ctx.values [] octx, C.WellKindedTy ty :=
   generableTypesFromCtx_wellKinded ctx.values [] octx h.ctxWK (by simp) h.octxWK
 
-/-- The `bool` fallback the call generator uses when nothing is generable is well-kinded. -/
-theorem WellKindedOk.boolWK {octx : OpCtx} {procs : ProcSigCtx}
-    {C : LContext CoreLParams} {ctx : VarCtx} (h : WellKindedOk octx procs C ctx) :
-    C.WellKindedTy .bool :=
-  genLMonoTy_mem_wellKindedTy (tvars := []) h.arities genLMonoTy_mem_bool
-
 /-- `WellKindedAmbient` transports along an extension of the known-type table: nothing it
     asserts is disturbed by *adding* a type constructor name. -/
 theorem WellKindedAmbient.mono {octx : OpCtx} {procs : ProcSigCtx}
@@ -579,33 +573,40 @@ theorem genCallStmt_outCtx {procs : ProcSigCtx}
     obtain ⟨_, _, _, _, hr⟩ := hr
     exact genCallTail_outCtx hFun r hr
 
-/-- A type that `sampleTyArg` draws from the generable types of the scope is well-kinded: it is a
-    generable type, or the `bool` fallback, and both are well-kinded. -/
+/-- A type that `sampleTyArg` draws is well-kinded: it is a generable type of
+    the scope or a well-kinded type over the known types. -/
 theorem sampleTyArg_wellKinded {procs : ProcSigCtx} {C : LContext CoreLParams}
-    {ctx : VarCtx} (hWK : WellKindedOk octx procs C ctx) (t : LMonoTy)
+    {ctx : VarCtx} (hWK : WellKindedOk octx procs C ctx) (size : Nat) (t : LMonoTy)
     (ht : t ∈ SPMF.support
-      (sampleTyArg (G := SPMF) tvars (generableTypesFromCtx ctx.values [] octx))) :
+      (sampleTyArg (G := SPMF) C.knownTypes tvars size
+        (generableTypesFromCtx ctx.values [] octx))) :
     C.WellKindedTy t := by
   unfold sampleTyArg at ht
   dsimp only at ht
   split at ht
-  · have hfilt := List.mem_filter.mp (by rwa [mem_support_elements_iff] at ht)
-    exact hWK.generable t hfilt.1
-  · rw [mem_support_pure_iff] at ht; rw [ht]; exact hWK.boolWK
+  · rw [mem_support_frequency_iff] at ht
+    obtain ⟨_, g, hg, _, hmem⟩ := ht
+    simp only [List.mem_cons, List.not_mem_nil, or_false, Prod.mk.injEq] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
+    · have hfilt := List.mem_filter.mp (by rwa [mem_support_elements_iff] at hmem)
+      exact hWK.generable t hfilt.1
+    · exact (genKnownTy_sound C.knownTypes tvars size t hmem).2.1
+  · exact (genKnownTy_sound C.knownTypes tvars size t ht).2.1
 
 /-- The instantiation that `genCallStmt` samples for the type parameters of a callee is
     well-kinded. -/
 private theorem sampled_inst_wellKinded {procs : ProcSigCtx} {C : LContext CoreLParams}
     {ctx : VarCtx} (hWK : WellKindedOk octx procs C ctx) {typeArgs : List TyIdentifier}
-    {σvals : List LMonoTy}
+    {σvals : List LMonoTy} {size : Nat}
     (hσvals : σvals ∈ SPMF.support (typeArgs.mapM (fun _ =>
-      sampleTyArg (G := SPMF) tvars (generableTypesFromCtx ctx.values [] octx)))) :
+      sampleTyArg (G := SPMF) C.knownTypes tvars size
+        (generableTypesFromCtx ctx.values [] octx)))) :
     ∀ t ∈ (typeArgs.zip σvals).map Prod.snd, C.WellKindedTy t := by
   intro t ht
   obtain ⟨q, hq, rfl⟩ := List.mem_map.mp ht
   obtain ⟨τ0, _, hmem⟩ :=
     forall₂_mem_left ((mem_support_mapM_iff _ typeArgs σvals).mp hσvals) q.2 (List.of_mem_zip hq).2
-  exact sampleTyArg_wellKinded hWK q.2 hmem
+  exact sampleTyArg_wellKinded hWK size q.2 hmem
 
 /-- Each type of the in-out block of a callable procedure is well-kinded. -/
 theorem sigsWK_inout {procs : ProcSigCtx} {C : LContext CoreLParams} {ctx : VarCtx}
@@ -664,9 +665,9 @@ theorem genCallTail_outCtx_wellKinded {procs : ProcSigCtx}
 
 /-- The `call` case of the well-kindedness invariant. The inline `init` chain declares
     the callee's `σ`-instantiated in-out and out-only types, and those are well-kinded in
-    `C` because the sampled `σ` values are (`WellKindedOk.generable`, or the `bool`
-    fallback) and `substSig` preserves well-kindedness. Everything else in the output scope
-    was already there. -/
+    `C` because each sampled `σ` value is a generable type of the scope or a well-kinded type
+    over the known types (`sampleTyArg_wellKinded`) and `substSig` preserves well-kindedness.
+    Everything else in the output scope was already there. -/
 theorem genCallStmt_outCtx_wellKinded {procs : ProcSigCtx}
     {C : LContext CoreLParams} {ctx : VarCtx} {d : Nat}
     (hWK : WellKindedOk octx procs C ctx)
@@ -851,7 +852,8 @@ theorem genCallStmt_mem_complete (procs : ProcSigCtx)
     (σvals : List LMonoTy)
     (hσvals : σvals ∈ SPMF.support
       (s.typeArgs.mapM (fun _ =>
-        sampleTyArg tvars (generableTypesFromCtx ctx.values [] octx)) : SPMF (List LMonoTy)))
+        sampleTyArg C.knownTypes tvars d (generableTypesFromCtx ctx.values [] octx)) :
+        SPMF (List LMonoTy)))
     (exprs : List Expression.Expr) (mask : List Bool)
     (hMusable : (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).all
       (usableName immutableVars ctx) = true)
@@ -1129,14 +1131,16 @@ theorem matchTargets_rangeKnown (ks : KnownTypes) (formals : @LMonoTySignature U
     their range registered, and the types of the scope are well-kinded. -/
 theorem matchedTyArg_wellKinded {procs : ProcSigCtx} {C : LContext CoreLParams} {ctx : VarCtx}
     (hWK : WellKindedOk octx procs C ctx) (substs : List Lambda.Subst)
-    (hsub : ∀ sb ∈ substs, Subst.RangeKnown sb C.knownTypes) (f : TyIdentifier) (t : LMonoTy)
+    (hsub : ∀ sb ∈ substs, Subst.RangeKnown sb C.knownTypes) (size : Nat) (f : TyIdentifier)
+    (t : LMonoTy)
     (ht : t ∈ SPMF.support
-      (matchedTyArg (G := SPMF) tvars (generableTypesFromCtx ctx.values [] octx) substs f)) :
+      (matchedTyArg (G := SPMF) C.knownTypes tvars size
+        (generableTypesFromCtx ctx.values [] octx) substs f)) :
     C.WellKindedTy t := by
   unfold matchedTyArg at ht
   rcases hfs : substs.findSome? (fun sb => Strata.Util.HMaps.find? sb f) with _ | t'
   · rw [hfs] at ht
-    exact sampleTyArg_wellKinded hWK t ht
+    exact sampleTyArg_wellKinded hWK size t ht
   · rw [hfs] at ht
     obtain ⟨sb, hsbmem, hsbfind⟩ := List.exists_of_findSome?_eq_some hfs
     dsimp only at ht
@@ -1145,29 +1149,45 @@ theorem matchedTyArg_wellKinded {procs : ProcSigCtx} {C : LContext CoreLParams} 
       subst ht
       exact LMonoTy.knownInstance_wellKinded t C.knownTypes
         (hsub sb hsbmem t (Strata.Util.HMaps.find?_mem_values sb hsbfind))
-    · exact sampleTyArg_wellKinded hWK t ht
+    · exact sampleTyArg_wellKinded hWK size t ht
+
+/-- A type whose free type variables are all declared in `tvars` is within
+    `tvars`. -/
+theorem tyVarsWithin_of_allFtvarsIn {t : LMonoTy} (h : allFtvarsIn tvars t) :
+    tyVarsWithin tvars t = true :=
+  List.all_eq_true.mpr fun v hv => List.contains_iff_mem.mpr (allFtvarsIn_freeVars h v hv)
+
+/-- A type that is within `tvars` has all its free type variables declared in
+    `tvars`. -/
+theorem allFtvarsIn_of_tyVarsWithin {t : LMonoTy} (h : tyVarsWithin tvars t = true) :
+    allFtvarsIn tvars t :=
+  allFtvarsIn_of_freeVars fun v hv => List.contains_iff_mem.mp (List.all_eq_true.mp h v hv)
 
 /-- The type that `sampleTyArg` draws has its type variables in `tvars`. -/
-theorem sampleTyArg_tyVarsWithin (generableTys : List LMonoTy) (t : LMonoTy)
-    (ht : t ∈ SPMF.support (sampleTyArg (G := SPMF) tvars generableTys)) :
+theorem sampleTyArg_tyVarsWithin (kt : Lambda.KnownTypes) (size : Nat)
+    (generableTys : List LMonoTy) (t : LMonoTy)
+    (ht : t ∈ SPMF.support (sampleTyArg (G := SPMF) kt tvars size generableTys)) :
     tyVarsWithin tvars t = true := by
   unfold sampleTyArg at ht
   dsimp only at ht
   split at ht
-  · exact (List.mem_filter.mp (by rwa [mem_support_elements_iff] at ht)).2
-  · rw [mem_support_pure_iff] at ht
-    subst ht
-    rfl
+  · rw [mem_support_frequency_iff] at ht
+    obtain ⟨_, g, hg, _, hmem⟩ := ht
+    simp only [List.mem_cons, List.not_mem_nil, or_false, Prod.mk.injEq] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
+    · exact (List.mem_filter.mp (by rwa [mem_support_elements_iff] at hmem)).2
+    · exact tyVarsWithin_of_allFtvarsIn (genKnownTy_sound kt tvars size t hmem).1
+  · exact tyVarsWithin_of_allFtvarsIn (genKnownTy_sound kt tvars size t ht).1
 
 /-- The type that `matchedTyArg` draws has its type variables in `tvars`. -/
-theorem matchedTyArg_tyVarsWithin (generableTys : List LMonoTy) (substs : List Lambda.Subst)
-    (f : TyIdentifier) (t : LMonoTy)
-    (ht : t ∈ SPMF.support (matchedTyArg (G := SPMF) tvars generableTys substs f)) :
+theorem matchedTyArg_tyVarsWithin (kt : Lambda.KnownTypes) (size : Nat)
+    (generableTys : List LMonoTy) (substs : List Lambda.Subst) (f : TyIdentifier) (t : LMonoTy)
+    (ht : t ∈ SPMF.support (matchedTyArg (G := SPMF) kt tvars size generableTys substs f)) :
     tyVarsWithin tvars t = true := by
   unfold matchedTyArg at ht
   rcases hfs : substs.findSome? (fun sb => Strata.Util.HMaps.find? sb f) with _ | t'
   · rw [hfs] at ht
-    exact sampleTyArg_tyVarsWithin generableTys t ht
+    exact sampleTyArg_tyVarsWithin kt size generableTys t ht
   · rw [hfs] at ht
     dsimp only at ht
     split at ht
@@ -1175,7 +1195,7 @@ theorem matchedTyArg_tyVarsWithin (generableTys : List LMonoTy) (substs : List L
       rw [mem_support_pure_iff] at ht
       subst ht
       exact hwithin
-    · exact sampleTyArg_tyVarsWithin generableTys t ht
+    · exact sampleTyArg_tyVarsWithin kt size generableTys t ht
 
 /-- A variable of a type within `tvars` is in `tvars`. -/
 theorem mem_of_tyVarsWithin {t : LMonoTy} {v : TyIdentifier}
@@ -1283,7 +1303,7 @@ theorem genCallStmtMatch_cases {procs : ProcSigCtx} {C : LContext CoreLParams} {
           obtain ⟨q, hq, rfl⟩ := List.mem_map.mp ht
           obtain ⟨f, _, hmem⟩ :=
             forall₂_mem_left ((mem_support_mapM_iff _ _ σvals).mp hσvals) q.2 (List.of_mem_zip hq).2
-          exact matchedTyArg_wellKinded hWK substs hsub f q.2 hmem
+          exact matchedTyArg_wellKinded hWK substs hsub _ f q.2 hmem
         have hlen' : (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O).length
             ≤ chosen.length := by
           rw [StrataGenerators.Stmt.substSig_length]; omega
@@ -1294,7 +1314,7 @@ theorem genCallStmtMatch_cases {procs : ProcSigCtx} {C : LContext CoreLParams} {
         have hσbound : ∀ t ∈ σvals, tyVarsWithin tvars t = true := by
           intro t ht
           obtain ⟨f, _, hmem⟩ := forall₂_mem_left hmapM t ht
-          exact matchedTyArg_tyVarsWithin _ substs f t hmem
+          exact matchedTyArg_tyVarsWithin _ _ _ substs f t hmem
         exact ⟨s, chosen, σvals, hs', hlen', hcand, hσlen, hσbound, hσWK, hmatched, hr⟩
       · simp only [mem_support_bot_iff] at hr
 
