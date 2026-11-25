@@ -257,7 +257,7 @@ theorem genCallStmt_tyVars (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx 
     have hσ : ∀ t ∈ σvals, tyVarsWithin tvars t = true := by
       intro t ht
       obtain ⟨_, _, hmem⟩ := forall₂_mem_left hmapM t ht
-      exact sampleTyArg_tyVarsWithin _ t hmem
+      exact sampleTyArg_tyVarsWithin _ _ _ t hmem
     exact genCallTail_tyVars hctx (hsigs s hs') hlen hσ (outTargets_values _ _ _ _) r hr
 
 /-- A `genCallStmtMatch` group declares only within `tvars`, when each callee mentions only its
